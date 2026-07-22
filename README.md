@@ -27,84 +27,20 @@ npx skills add kthaisociety/skills --all --global --yes
 Install a single skill:
 
 ```bash
-npx skills add kthaisociety/skills --skill kthais-nextjs
+npx skills add kthaisociety/skills --skill <skill-name>
 ```
 
-Browse this collection on [skills.sh/kthaisociety/skills](https://skills.sh/kthaisociety/skills).
+List skills in this repo:
 
-## Available Skills
+```bash
+npx skills add kthaisociety/skills --list
+```
 
-### kthais-nextjs
-
-Next.js conventions and patterns for KTHAIS projects.
-
-**Use when:**
-
-- Building or modifying Next.js apps in the KTHAIS ecosystem
-- Choosing App Router patterns, server vs client components, or project layout
-
-### kthais-code-review
-
-Code review standards for KTHAIS projects.
-
-**Use when:**
-
-- Reviewing pull requests or diffs
-- Drafting review feedback for KTHAIS repositories
-
-### frontend-design
-
-Guidance for distinctive, intentional visual design when building new UI or reshaping an existing one.
-
-**Use when:**
-
-- Designing new UI or redesigning an interface
-- Choosing typography, palette, layout, or aesthetic direction
-- Avoiding generic, templated-looking interfaces
-
-Upstream: [anthropics/skills](https://github.com/anthropics/skills)
-
-### vercel-react-best-practices
-
-React and Next.js performance optimization guidelines from Vercel Engineering.
-
-**Use when:**
-
-- Writing or reviewing React / Next.js code
-- Optimizing data fetching, bundle size, or render performance
-
-Upstream: [vercel-labs/agent-skills](https://github.com/vercel-labs/agent-skills) (`skills/react-best-practices`)
-
-### web-design-guidelines
-
-Review UI code for Web Interface Guidelines compliance (accessibility, UX, performance).
-
-**Use when:**
-
-- "Review my UI"
-- "Check accessibility"
-- "Audit design"
-- "Review UX"
-
-Upstream: [vercel-labs/agent-skills](https://github.com/vercel-labs/agent-skills)
+Browse the collection on [skills.sh/kthaisociety/skills](https://skills.sh/kthaisociety/skills).
 
 ## Usage
 
 Skills are available to your agent after install. The agent loads them when the task matches a skill description.
-
-Examples:
-
-```
-Review this PR against KTHAIS standards
-```
-
-```
-Build this Next.js page using our conventions
-```
-
-```
-Review my UI for accessibility and design guidelines
-```
 
 ## How this repository works
 
@@ -122,7 +58,7 @@ npx skills add kthaisociety/skills --all
 
 | Layer | Role |
 | --- | --- |
-| First-party | Authored here under `skills/<name>/` |
+| First-party | Authored here under `skills/internal/<name>/` |
 | External | Vendored into `skills/external/<name>/`, pinned by commit in `sources.json` |
 | Consumers | Install from this GitHub repo with the skills CLI |
 
@@ -136,24 +72,27 @@ Each skill is a directory with a `SKILL.md` (YAML frontmatter + instructions), m
 
 ```text
 skills/
-├── kthais-nextjs/SKILL.md
-├── kthais-code-review/SKILL.md
+├── internal/
+│   └── <first-party-skill>/SKILL.md
 └── external/
-    ├── frontend-design/
-    ├── vercel-react-best-practices/
-    └── web-design-guidelines/
+    └── <vendored-skill>/
 ```
 
-The CLI discovers both flat skills (`skills/<name>/`) and catalog-nested skills (`skills/external/<name>/`).
+The CLI discovers catalog-nested skills under `skills/internal/` and `skills/external/`.
 
 ## Maintainer commands
 
 ```bash
-# Vendor a new external skill
+# Vendor a new external skill (discovers nested paths like skills/productivity/<name>)
 npm run skill:add -- owner/repo skill-name
+npm run skill:add -- https://github.com/owner/repo --skill skill-name
 
-# Nonstandard source path
+# Override source path when needed
 npm run skill:add -- owner/repo local-name path/to/skill
+
+# Remove a vendored external skill
+npm run skill:remove -- skill-name
+npm run skill:remove -- --skill skill-name
 
 # Update vendored skills to latest upstream commits
 npm run skill:sync

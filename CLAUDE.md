@@ -12,7 +12,7 @@ npx skills add kthaisociety/skills --all
 
 ## Layout
 
-- First-party skills: `skills/<name>/SKILL.md`
+- First-party skills: `skills/internal/<name>/SKILL.md`
 - Vendored external skills: `skills/external/<name>/` (pinned in `sources.json`)
 - Do not commit local agent installs (`.agents/`, `.claude/`, `skills-lock.json`)
 
@@ -20,6 +20,7 @@ npx skills add kthaisociety/skills --all
 
 ```bash
 npm run skill:add -- owner/repo skill-name [source-path]
+npm run skill:remove -- skill-name
 npm run skill:sync
 npm run skill:check
 ```
@@ -28,7 +29,7 @@ Never use `npx skills add` against other repos to populate this Git tree — tha
 
 ## When changing skills
 
-Update `SKILL.md`, README “Available Skills”, and `skills.sh.json` together. For externals, only change files via the sync scripts so commit pins stay correct.
+Update `SKILL.md` and `skills.sh.json` together. For externals, only change files via the sync scripts so commit pins stay correct.
 
 Verify discovery with:
 

@@ -14,7 +14,7 @@ They do **not** clone this repo into `.agents/` / `.claude/` via ad-hoc `npx ski
 
 | Path | Purpose |
 | --- | --- |
-| `skills/<name>/SKILL.md` | First-party KTHAIS skills |
+| `skills/internal/<name>/SKILL.md` | First-party KTHAIS skills |
 | `skills/external/<name>/` | Vendored upstream skills (committed copies) |
 | `sources.json` | Manifest + commit pins for external skills |
 | `scripts/add-external-skill.mjs` | Add/update one external skill |
@@ -39,8 +39,9 @@ description: What it does and when to use it (agents match on this)
 
 The skills CLI discovers:
 
-1. `skills/<skill>/SKILL.md` (flat)
-2. `skills/<group>/<skill>/SKILL.md` (catalog — e.g. `skills/external/...`)
+1. `skills/internal/<skill>/SKILL.md`
+2. `skills/external/<skill>/SKILL.md`
+3. Also flat `skills/<skill>/SKILL.md` if present
 
 After changing skills, verify discovery:
 
@@ -50,12 +51,14 @@ npx skills add . --list
 
 ## First-party vs external
 
-**First-party** (`skills/kthais-*`): edit `SKILL.md` in place. Do not add these to `sources.json`.
+**First-party** (`skills/internal/*`): edit `SKILL.md` in place. Do not add these to `sources.json`.
 
 **External** (`skills/external/*`): never hand-edit to “improve” upstream content. Change via:
 
 ```bash
 npm run skill:add -- owner/repo skill-name [source-path]
+npm run skill:add -- https://github.com/owner/repo --skill skill-name
+npm run skill:remove -- skill-name
 npm run skill:sync
 ```
 
@@ -79,7 +82,7 @@ Pin to the resolved SHA after add/sync so installs are reproducible.
 
 - Keep first-party skills focused; put procedural knowledge in `SKILL.md`
 - Vendor externals only through the scripts so `sources.json` stays accurate
-- Update README skill list and `skills.sh.json` when adding/removing skills
+- Update `skills.sh.json` when adding/removing skills (README stays install-focused, not a skill catalog)
 - Prefer `npx skills add kthaisociety/skills` language in docs (skills.sh install UX)
 
 **Don’t**
@@ -91,8 +94,9 @@ Pin to the resolved SHA after add/sync so installs are reproducible.
 ## Maintainer scripts
 
 ```bash
-npm run skill:add -- anthropics/skills frontend-design
-npm run skill:add -- vercel-labs/agent-skills vercel-react-best-practices skills/react-best-practices
+npm run skill:add -- https://github.com/shadcn/ui --skill shadcn
+npm run skill:add -- https://github.com/vercel-labs/agent-skills --skill vercel-react-best-practices
+npm run skill:remove -- shadcn
 npm run skill:sync
 npm run skill:check
 npm run skills:install
@@ -106,9 +110,8 @@ When adding, removing, or renaming a skill:
 
 1. Skill directory + valid `SKILL.md`
 2. `sources.json` (external only)
-3. [README.md](./README.md) “Available Skills”
-4. [skills.sh.json](./skills.sh.json) groupings
-5. This file if layout or workflow changes
+3. [skills.sh.json](./skills.sh.json) groupings
+4. This file if layout or workflow changes
 
 ## Ecosystem links
 

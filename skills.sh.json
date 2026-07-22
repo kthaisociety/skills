@@ -3,19 +3,28 @@
   "notGrouped": "bottom",
   "groupings": [
     {
-      "title": "KTHAIS",
-      "description": "First-party skills for KTHAIS projects and review standards.",
-      "skills": ["kthais-nextjs", "kthais-code-review"]
-    },
-    {
-      "title": "Design",
-      "description": "Skills for visual design, UI review, accessibility, and UX quality.",
-      "skills": ["frontend-design", "web-design-guidelines"]
+      "title": "Engineering",
+      "description": "Skills for implementing changes with review discipline.",
+      "skills": ["implement-with-review"]
     },
     {
       "title": "React",
-      "description": "Skills for React and Next.js performance and engineering patterns.",
-      "skills": ["vercel-react-best-practices"]
+      "description": "Skills for React, composition patterns, and UI components.",
+      "skills": [
+        "vercel-react-best-practices",
+        "vercel-composition-patterns",
+        "shadcn"
+      ]
+    },
+    {
+      "title": "AI",
+      "description": "Skills for building with the Vercel AI SDK.",
+      "skills": ["ai-sdk"]
+    },
+    {
+      "title": "Data",
+      "description": "Skills for databases and serverless Postgres.",
+      "skills": ["neon-postgres"]
     }
   ]
 }

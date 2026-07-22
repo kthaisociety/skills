@@ -1,24 +1,38 @@
 {
   "skills": [
     {
-      "name": "frontend-design",
-      "repository": "anthropics/skills",
-      "path": "skills/frontend-design",
-      "destination": "skills/external/frontend-design",
-      "commit": "fa0fa64bdc967915dc8399e803be67759e1e62b8"
+      "name": "ai-sdk",
+      "repository": "vercel/ai",
+      "path": "skills/use-ai-sdk",
+      "destination": "skills/external/ai-sdk",
+      "commit": "799faf71e05a7d580914ad94d943d28c0400554c"
+    },
+    {
+      "name": "neon-postgres",
+      "repository": "neondatabase/agent-skills",
+      "path": "skills/neon-postgres",
+      "destination": "skills/external/neon-postgres",
+      "commit": "d232c83a87bd61bacb1ad60de128fcc91a9b6418"
+    },
+    {
+      "name": "shadcn",
+      "repository": "shadcn/ui",
+      "path": "skills/shadcn",
+      "destination": "skills/external/shadcn",
+      "commit": "91f21dfe1328585670275781b4525fff2507f917"
+    },
+    {
+      "name": "vercel-composition-patterns",
+      "repository": "vercel-labs/agent-skills",
+      "path": "skills/composition-patterns",
+      "destination": "skills/external/vercel-composition-patterns",
+      "commit": "4559f18a20c1691c744b4395194290db6a0df5e9"
     },
     {
       "name": "vercel-react-best-practices",
       "repository": "vercel-labs/agent-skills",
       "path": "skills/react-best-practices",
       "destination": "skills/external/vercel-react-best-practices",
-      "commit": "4559f18a20c1691c744b4395194290db6a0df5e9"
-    },
-    {
-      "name": "web-design-guidelines",
-      "repository": "vercel-labs/agent-skills",
-      "path": "skills/web-design-guidelines",
-      "destination": "skills/external/web-design-guidelines",
       "commit": "4559f18a20c1691c744b4395194290db6a0df5e9"
     }
   ]
