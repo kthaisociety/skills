@@ -1,0 +1,11 @@
+{
+  "name": "@kthais/skills",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "skill:add": "node scripts/add-external-skill.mjs",
+    "skill:sync": "node scripts/sync-external-skills.mjs",
+    "skill:check": "node scripts/sync-external-skills.mjs --check",
+    "skills:install": "npx skills add . --all"
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "skills": [
+    {
+      "name": "frontend-design",
+      "repository": "anthropics/skills",
+      "path": "skills/frontend-design",
+      "destination": "skills/external/frontend-design",
+      "commit": "fa0fa64bdc967915dc8399e803be67759e1e62b8"
+    },
+    {
+      "name": "vercel-react-best-practices",
+      "repository": "vercel-labs/agent-skills",
+      "path": "skills/react-best-practices",
+      "destination": "skills/external/vercel-react-best-practices",
+      "commit": "4559f18a20c1691c744b4395194290db6a0df5e9"
+    },
+    {
+      "name": "web-design-guidelines",
+      "repository": "vercel-labs/agent-skills",
+      "path": "skills/web-design-guidelines",
+      "destination": "skills/external/web-design-guidelines",
+      "commit": "4559f18a20c1691c744b4395194290db6a0df5e9"
+    }
+  ]
+}

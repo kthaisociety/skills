@@ -1,0 +1,21 @@
+{
+  "$schema": "https://skills.sh/schemas/skills.sh.schema.json",
+  "notGrouped": "bottom",
+  "groupings": [
+    {
+      "title": "KTHAIS",
+      "description": "First-party skills for KTHAIS projects and review standards.",
+      "skills": ["kthais-nextjs", "kthais-code-review"]
+    },
+    {
+      "title": "Design",
+      "description": "Skills for visual design, UI review, accessibility, and UX quality.",
+      "skills": ["frontend-design", "web-design-guidelines"]
+    },
+    {
+      "title": "React",
+      "description": "Skills for React and Next.js performance and engineering patterns.",
+      "skills": ["vercel-react-best-practices"]
+    }
+  ]
+}

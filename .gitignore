@@ -1,0 +1,11 @@
+# Local agent skill installs (not part of this collection)
+.agents/
+.claude/
+.cursor/
+.codex/
+skills-lock.json
+
+# Dependencies and junk
+node_modules/
+.DS_Store
+*.log
