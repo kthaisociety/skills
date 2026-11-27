@@ -3,7 +3,9 @@
 # Runs once a day, and by hand from the Actions tab. The job does nothing
 # when the newest tag matches ais-max/.source.json (ADR-0011). Every
 # decision past the trigger lives in scripts/scheduled-sync.py, which the
-# last step runs; see its docstrings for what the job guarantees.
+# last step runs; see its docstrings for what the job guarantees. Claude
+# Code and agy are installed first, since the Claude and Antigravity checks
+# fail without them (ADR-0006, ADR-0009).
 #
 # Needs the repo setting "Allow GitHub Actions to create and approve pull
 # requests", under Settings, Actions, General.
@@ -35,8 +37,15 @@ jobs:
         with:
           python-version: "3.x"
 
-      # The Claude and Antigravity checks fail without their CLIs
-      # (ADR-0006, ADR-0009). Install both here, with their native installers.
+      - name: Install Claude Code
+        run: |
+          curl -fsSL https://claude.ai/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install agy
+        run: |
+          curl -fsSL https://antigravity.google/cli/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Sync, check, and open a PR
         env:
