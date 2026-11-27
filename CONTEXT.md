@@ -24,10 +24,15 @@ _Avoid_: update, pull, mirror
 A repo that holds only the built plugins for one agent, published from this repo.
 _Avoid_: mirror, dist repo
 
+**Tree**:
+The built layout one agent's **Release repo** holds: a marketplace listing **ais** and **ais-max**, each with its skills. A build script writes it into a git-ignored build folder for one version, and a check confirms the agent can read it.
+_Avoid_: dist, build output
+
 ## Relationships
 
 - **ais-max** depends on exactly one **ais**
 - Each agent has exactly one **Release repo**, holding both **ais** and **ais-max**
+- A **Release repo** holds one **Tree**, rebuilt for every release, with one version shared by its marketplace and both plugins
 - Every skill in **ais** came from one **Seed**; a **Sync** never touches **ais**
 - A **Sync** replaces the base-file copies in `ais-max`'s `helper-skill` with the **ais** versions
 
