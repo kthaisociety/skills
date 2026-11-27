@@ -1,4 +1,4 @@
-"""Acceptance tests for #6: scripts/build-claude.py builds and checks the ais-claude tree.
+"""Tests for scripts/build-claude.py, which builds and checks the ais-claude tree.
 
 Every test runs in a temp folder against fake ais and ais-max folders and a
 fake `claude` command, except TestRealTree, which builds from this repo's own
@@ -462,6 +462,11 @@ class TestCheckSkills(CheckCase):
         self.skill("ais", "grill-docs").unlink()
         self.assert_reports("ais/skills/grill-docs")
 
+    def test_unterminated_frontmatter_fails(self):
+        """A SKILL.md whose frontmatter never closes gives a message naming the skill's path."""
+        write(self.skill("ais", "new-ticket"), b"---\nname: new-ticket\ndescription: Does a thing.\n")
+        self.assert_reports("ais/skills/new-ticket")
+
     def test_block_scalar_description_passes(self):
         """A description written as a folded YAML block counts as present."""
         write(self.skill("ais", "new-ticket"),
@@ -535,6 +540,11 @@ class TestCheckManifests(CheckCase):
         """A marketplace listing ais twice gives a message naming the file."""
         edit_json(self.marketplace(), lambda d: d["plugins"].append(dict(d["plugins"][0])))
         self.assert_reports(".claude-plugin/marketplace.json")
+
+    def test_marketplace_plugins_not_a_list_fails(self):
+        """A marketplace whose plugins is not a list gives a message naming the file."""
+        edit_json(self.marketplace(), lambda d: d.update(plugins={}))
+        self.assert_reports(".claude-plugin/marketplace.json", "plugins is not a list")
 
     def test_missing_plugin_json_fails(self):
         """A plugin folder with no plugin.json gives a message naming the file."""
@@ -683,13 +693,12 @@ class TestMain(Case):
 
     def test_build_never_runs_the_check(self):
         """build writes the tree without calling claude."""
-        result = self.run_main("build", VERSION)
-        self.assertEqual((result.returncode, calls_made(self.calls)), (0, []))
+        self.run_main("build", VERSION)
+        self.assertEqual(calls_made(self.calls), [])
 
     def test_bad_version_exits_one(self):
-        """build with a bad version exits 1 cleanly, without a traceback."""
-        result = self.run_main("build", "1.0")
-        self.assertEqual((result.returncode, "Traceback" in result.stderr), (1, False))
+        """build with a bad version exits 1."""
+        self.assertEqual(self.run_main("build", "1.0").returncode, 1)
 
     def test_bad_version_prints_one_error_line(self):
         """build with a bad version prints one "error: " line on stderr and no traceback."""
@@ -722,11 +731,16 @@ class TestMain(Case):
                          [["plugin", "validate", "--strict", "--json", str(other)]])
 
     def test_check_failing_tree_exits_one(self):
-        """check on a tree that breaks a rule exits 1 cleanly, without a traceback."""
+        """check on a tree that breaks a rule exits 1."""
         write_tree(self.dest)
         write(self.dest / "ais" / "skills" / "new-ticket" / "SKILL.md", skill_md("other"))
-        result = self.run_main("check")
-        self.assertEqual((result.returncode, "Traceback" in result.stderr), (1, False))
+        self.assertEqual(self.run_main("check").returncode, 1)
+
+    def test_check_failing_tree_prints_no_traceback(self):
+        """check on a tree that breaks a rule fails cleanly, without a traceback."""
+        write_tree(self.dest)
+        write(self.dest / "ais" / "skills" / "new-ticket" / "SKILL.md", skill_md("other"))
+        self.assertNotIn("Traceback", self.run_main("check").stderr)
 
     def test_check_failing_tree_prints_every_message(self):
         """check prints each message check_tree returns on its own stderr line, in order."""
