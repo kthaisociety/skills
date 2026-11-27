@@ -17,7 +17,7 @@ The one-time copy of a Custom-skills skill into **ais**, after which this repo a
 _Avoid_: import, fork
 
 **Sync**:
-A run of `scripts/sync-ais-max.py` that rebuilds **ais-max** from one Custom-skills release tag. The scheduled job runs it against the latest tag and opens a PR only when the rebuild leaves a diff.
+A run of `scripts/sync-ais-max.py` that rebuilds **ais-max** from one Custom-skills release tag. The scheduled job runs it only when Custom-skills has a newer release tag than the one **ais-max** records, and opens a PR for that tag.
 _Avoid_: update, pull, mirror
 
 **Release repo**:

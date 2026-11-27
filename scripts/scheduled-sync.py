@@ -27,6 +27,7 @@ SOURCE_REPO = _sync_ais_max.SOURCE_REPO
 
 
 _RELEASE_TAG = re.compile(r"v([0-9]+)\.([0-9]+)\.([0-9]+)")
+_TAG_REF = "refs/tags/"
 
 
 class JobError(Exception):
@@ -50,28 +51,27 @@ def latest_tag(repo):
     Raises JobError when git can't list repo's tags, such as an unreachable
     URL or a path that is not a git repo. The message names repo.
     """
-    env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
     try:
         out = subprocess.run(["git", "ls-remote", "--tags", repo], check=True,
-                             capture_output=True, text=True, env=env).stdout
+                             capture_output=True, text=True, env=_quiet_env()).stdout
     except subprocess.CalledProcessError as error:
         raise JobError(f"could not list tags of {repo}: {_last_line(error.stderr) or error}")
     except OSError as error:
         raise JobError(f"could not run git to list tags of {repo}: {error}")
+    return max(_release_tags(out), key=_version, default=None)
 
-    best, best_key = None, None
-    for line in out.splitlines():
+
+def _release_tags(ls_remote_output):
+    """Yield every release tag name in git ls-remote output, in listed order."""
+    for line in ls_remote_output.splitlines():
         ref = line.split("\t")[-1]
-        if not ref.startswith("refs/tags/"):
-            continue
-        name = ref[len("refs/tags/"):]
-        match = _RELEASE_TAG.fullmatch(name)
-        if not match:
-            continue
-        key = tuple(int(part) for part in match.groups())
-        if best_key is None or key > best_key:
-            best, best_key = name, key
-    return best
+        if ref.startswith(_TAG_REF) and _RELEASE_TAG.fullmatch(ref[len(_TAG_REF):]):
+            yield ref[len(_TAG_REF):]
+
+
+def _version(release_tag):
+    """Return a release tag's X, Y and Z as a tuple of ints, for ordering."""
+    return tuple(int(part) for part in _RELEASE_TAG.fullmatch(release_tag).groups())
 
 
 # The checks a synced ais-max has to pass before the job pushes anything.
@@ -110,26 +110,25 @@ def _last_line(text):
     return lines[-1] if lines else ""
 
 
-def _git(cwd, *args):
-    """Run git in cwd and return its stdout. Raises JobError naming the git command on failure."""
+def _tool(name, command, cwd, args):
+    """Run command with args in cwd and return its stdout. Raises JobError naming the tool and subcommand on failure."""
     try:
-        return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True,
+        return subprocess.run([command, *args], cwd=cwd, check=True, capture_output=True,
                               text=True, env=_quiet_env()).stdout
     except subprocess.CalledProcessError as error:
-        raise JobError(f"git {' '.join(args[:2])} failed: {_last_line(error.stderr) or error}")
+        raise JobError(f"{name} {' '.join(args[:2])} failed: {_last_line(error.stderr) or error}")
     except OSError as error:
-        raise JobError(f"could not run git: {error}")
+        raise JobError(f"could not run {name}: {error}")
+
+
+def _git(cwd, *args):
+    """Run git in cwd and return its stdout. Raises JobError naming the git command on failure."""
+    return _tool("git", "git", cwd, args)
 
 
 def _gh(gh, cwd, *args):
     """Run the GitHub CLI in cwd and return its stdout. Raises JobError naming the gh command on failure."""
-    try:
-        return subprocess.run([gh, *args], cwd=cwd, check=True, capture_output=True,
-                              text=True, env=_quiet_env()).stdout
-    except subprocess.CalledProcessError as error:
-        raise JobError(f"gh {' '.join(args[:2])} failed: {_last_line(error.stderr) or error}")
-    except OSError as error:
-        raise JobError(f"could not run gh: {error}")
+    return _tool("gh", gh, cwd, args)
 
 
 def _recorded_tag(root):
@@ -145,22 +144,26 @@ def _recorded_tag(root):
     return tag
 
 
-def _outside_ais_max(root):
-    """Return every path under root that differs from HEAD, untracked files included, outside ais-max/."""
-    entries = _git(root, "status", "--porcelain", "-z", "--untracked-files=all").split("\0")
-    paths, i = [], 0
-    while i < len(entries):
-        entry = entries[i]
-        i += 1
+def _changed_paths(root):
+    """Yield every path under root that differs from HEAD, untracked files included.
+
+    A rename or copy yields only its new path. Git lists its source path
+    as the next entry, and that is not a separate change.
+    """
+    entries = iter(_git(root, "status", "--porcelain", "-z", "--untracked-files=all").split("\0"))
+    for entry in entries:
         if len(entry) < 4:
             continue
         status, path = entry[:2], entry[3:]
         if "R" in status or "C" in status:
-            i += 1  # a rename or copy is followed by its source path, which is not a separate change
-        if path == "ais-max" or path.startswith("ais-max/"):
-            continue
-        paths.append(path)
-    return paths
+            next(entries, None)
+        yield path
+
+
+def _outside_ais_max(root):
+    """Return every path under root that differs from HEAD, untracked files included, outside ais-max/."""
+    return [path for path in _changed_paths(root)
+            if path != "ais-max" and not path.startswith("ais-max/")]
 
 
 def _run_checks(checks, root):
@@ -187,6 +190,23 @@ def _commit_and_push(root, branch, old, new):
     _git(root, "add", "-A", "--", "ais-max")
     _git(root, *_AUTHOR, "commit", "-q", "-m", f"Sync ais-max from {old} to {new}", "--", "ais-max")
     _git(root, "push", "-q", "--force", "origin", branch)
+
+
+def _base_branch(root):
+    """Return the branch root has checked out. Raises JobError on a detached HEAD."""
+    base = _git(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
+    if base == "HEAD":
+        raise JobError("root is on a detached HEAD; check out the PR base branch first")
+    return base
+
+
+def _close_superseded(gh, root, open_prs, branch, url):
+    """Close every open sync PR not on branch, with a comment linking url, and delete its branch from origin."""
+    for pr in open_prs:
+        name = pr.get("headRefName", "")
+        if name.startswith(BRANCH_PREFIX) and name != branch:
+            _gh(gh, root, "pr", "close", str(pr["number"]), "--comment", f"Superseded by {url}")
+            _git(root, "push", "-q", "origin", "--delete", name)
 
 
 def _open_pr(gh, root, base, branch, old, new):
@@ -280,9 +300,7 @@ def run(repo=SOURCE_REPO, root=ROOT, gh="gh", checks=CHECKS, auto_merge=AUTO_MER
     _run_checks(checks, root)
 
     open_prs = _open_prs(gh, root)
-    base = _git(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
-    if base == "HEAD":
-        raise JobError("root is on a detached HEAD; check out the PR base branch first")
+    base = _base_branch(root)
 
     branch = BRANCH_PREFIX + tag
     _commit_and_push(root, branch, recorded, tag)
@@ -293,11 +311,7 @@ def run(repo=SOURCE_REPO, root=ROOT, gh="gh", checks=CHECKS, auto_merge=AUTO_MER
     else:
         url, outcome = _open_pr(gh, root, base, branch, recorded, tag), OPENED
 
-    for pr in open_prs:
-        name = pr.get("headRefName", "")
-        if name.startswith(BRANCH_PREFIX) and name != branch:
-            _gh(gh, root, "pr", "close", str(pr["number"]), "--comment", f"Superseded by {url}")
-            _git(root, "push", "-q", "origin", "--delete", name)
+    _close_superseded(gh, root, open_prs, branch, url)
 
     if auto_merge:
         _gh(gh, root, "pr", "merge", url, "--auto")
