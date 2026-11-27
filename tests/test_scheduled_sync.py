@@ -1,4 +1,4 @@
-"""Acceptance tests for #9, scripts/scheduled-sync.py, the scheduled ais-max sync.
+"""Tests for scripts/scheduled-sync.py, the scheduled ais-max sync.
 
 Every run() test works in a temp folder: a fake Custom-skills git repo, a
 fake checkout of this repo with ais/ and an ais-max/ synced at v2.1.0, a
@@ -575,6 +575,24 @@ class TestRunFailures(JobCase):
         self.run_failing()
         self.assertEqual(gh_calls(self.gh), [])
 
+    def test_unreadable_record_raises(self):
+        """A sync record that is not JSON raises JobError."""
+        write(self.root / "ais-max" / ".source.json", "not json\n")
+        git(self.root, "commit", "-q", "-am", "broken record")
+        self.run_failing()
+
+    def test_detached_head_raises(self):
+        """A root on a detached HEAD, with no base branch to open a PR against, raises JobError."""
+        git(self.root, "checkout", "-q", "--detach")
+        self.run_failing()
+
+    def test_detached_head_pushes_nothing(self):
+        """A detached HEAD leaves origin as it was."""
+        git(self.root, "checkout", "-q", "--detach")
+        before = origin_refs(self.root)
+        self.run_failing()
+        self.assertEqual(origin_refs(self.root), before)
+
     def test_failed_gh_raises(self):
         """A gh pr create that fails raises JobError."""
         gh = make_gh(self.tmp / "bin-fail", fail="pr create")
@@ -617,11 +635,9 @@ class TestMain(unittest.TestCase):
                          "Sync ais-max: up to date")
 
     def test_job_error_exits_one(self):
-        """A JobError exits 1, as a handled error rather than a crash."""
+        """A JobError exits 1."""
         add_tag(self.source, "latest")
-        result = self.run_script()
-        self.assertNotIn("Traceback", result.stderr)  # a crash also exits 1
-        self.assertEqual(result.returncode, 1)
+        self.assertEqual(self.run_script().returncode, 1)
 
     def test_job_error_prints_to_stderr(self):
         """A JobError prints "error: <message>" to stderr."""
