@@ -1,38 +1,8 @@
 # CLAUDE.md
 
-This repository is the KTHAIS managed [Agent Skills](https://www.skills.sh/) collection (`kthaisociety/skills`).
+This repo is the source for the KTHAIS plugins **ais** and **ais-max**, built per agent and published to the release repos `skills-claude`, `skills-codex` and `skills-agy`.
 
-Read and follow [AGENTS.md](./AGENTS.md) for full maintainer guidance. Summary:
+- Edit `ais/` by hand. `ais-max/` is written only by `scripts/sync-ais-max.py`.
+- Run `python3 -m unittest discover -s tests` after changing `scripts/` or `install.sh`.
 
-## Consumer install
-
-```bash
-npx skills add kthaisociety/skills --all
-```
-
-## Layout
-
-- First-party skills: `skills/internal/<name>/SKILL.md`
-- Vendored external skills: `skills/external/<name>/` (pinned in `sources.json`)
-- Do not commit local agent installs (`.agents/`, `.claude/`, `skills-lock.json`)
-
-## Maintaining external skills
-
-```bash
-npm run skill:add -- owner/repo skill-name [source-path]
-npm run skill:remove -- skill-name
-npm run skill:sync
-npm run skill:check
-```
-
-Never use `npx skills add` against other repos to populate this Git tree — that installs into agent directories, not into `skills/external/`.
-
-## When changing skills
-
-Update `SKILL.md` and `skills.sh.json` together. For externals, only change files via the sync scripts so commit pins stay correct.
-
-Verify discovery with:
-
-```bash
-npx skills add . --list
-```
+Read [AGENTS.md](./AGENTS.md) before changing anything. It covers the layout, the scripts and workflows, and the records in `CONTEXT.md`, `docs/adr/` and `docs/pcr/`.

@@ -1,120 +1,69 @@
 # AGENTS.md
 
-Guidance for AI coding agents working in the `kthaisociety/skills` repository.
+Guidance for maintainers of `kthaisociety/skills` and their agents. The member-facing description of the plugins and skills lives in [README.md](./README.md).
 
-This repo is a **skills source** for the [open agent skills ecosystem](https://www.skills.sh/). Consumers install from GitHub with:
+This repo is the source for two plugins, **ais** and **ais-max**. Build scripts turn them into one plugin tree per agent, and a release publishes each tree to that agent's release repo (`skills-claude`, `skills-codex`, `skills-agy`). Members install only from the release repos. Developers can also run `install.sh` from a clone (ADR-0004).
 
-```bash
-npx skills add kthaisociety/skills --all
-```
+## Records to read first
 
-They do **not** clone this repo into `.agents/` / `.claude/` via ad-hoc `npx skills add` against upstreams. That is a consumer install path, not how this collection is maintained.
+- [CONTEXT.md](./CONTEXT.md) defines the project's terms: ais, ais-max, seed, sync, release repo, plugin tree, local install, release tag. Use them as written there.
+- [docs/adr/](./docs/adr/) holds the decisions and the options that lost. Read the ADRs on the part you are changing before you change it.
+- [docs/pcr/](./docs/pcr/) holds the project conventions. PCR-0001 keeps every script on the Python standard library.
 
-## What lives here
+## Source layout and who writes it
 
-| Path | Purpose |
+| Path | Written by |
 | --- | --- |
-| `skills/internal/<name>/SKILL.md` | First-party KTHAIS skills |
-| `skills/external/<name>/` | Vendored upstream skills (committed copies) |
-| `sources.json` | Manifest + commit pins for external skills |
-| `scripts/add-external-skill.mjs` | Add/update one external skill |
-| `scripts/sync-external-skills.mjs` | Sync all external skills (or `--check`) |
-| `skills.sh.json` | Groupings for the [skills.sh](https://www.skills.sh/) repo page |
-| `package.json` | npm scripts for maintainers |
+| `ais/<skill>/` | Maintainers, by hand, only in this repo. Custom-skills never overwrites it (ADR-0002). |
+| `ais-max/<skill>/` | Only the sync. Hand edits are lost on the next sync. Change the skill in Custom-skills and cut a tag there. |
+| `ais-max/.source.json` | Only the sync. It records the Custom-skills tag and commit `ais-max` came from. |
+| `ais-max/helper-skill/` | Only the sync. It holds copies of base files from `ais` (`ticket-shapes.md`, `RECORD-FORMAT.md`, `ticket-pr.md`), taken from this repo's `ais`, not from Custom-skills. |
+| `scripts/` | Maintainers. One script per job, with its usage in the docstring. |
+| `tests/` | Maintainers. One test file per script. |
+| `.github/workflows/` | Maintainers. Each workflow's header comment says what it guarantees. |
+| `install.sh` | Maintainers. Its header comment documents every option and the order of a run. |
 
-## Skill format (skills.sh / Agent Skills)
+Each skill is a folder with a `SKILL.md` whose frontmatter `name` matches the folder name and has a `description`. When you add, remove or rename an `ais` skill, update its row in the README's skill table too.
 
-Every skill directory must contain `SKILL.md` with YAML frontmatter:
+## Scripts and workflows
 
-```yaml
----
-name: skill-slug
-description: What it does and when to use it (agents match on this)
----
-```
-
-- `name`: lowercase, hyphens; must match the folder name consumers will install
-- `description`: required; used for discovery and invocation
-- Optional: `scripts/`, `references/`, other supporting files next to `SKILL.md`
-
-The skills CLI discovers:
-
-1. `skills/internal/<skill>/SKILL.md`
-2. `skills/external/<skill>/SKILL.md`
-3. Also flat `skills/<skill>/SKILL.md` if present
-
-After changing skills, verify discovery:
+Run the tests after any change to `scripts/` or `install.sh`:
 
 ```bash
-npx skills add . --list
+python3 -m unittest discover -s tests
 ```
 
-## First-party vs external
-
-**First-party** (`skills/internal/*`): edit `SKILL.md` in place. Do not add these to `sources.json`.
-
-**External** (`skills/external/*`): never hand-edit to “improve” upstream content. Change via:
+Rebuild `ais-max` from one Custom-skills tag:
 
 ```bash
-npm run skill:add -- owner/repo skill-name [source-path]
-npm run skill:add -- https://github.com/owner/repo --skill skill-name
-npm run skill:remove -- skill-name
-npm run skill:sync
+python3 scripts/sync-ais-max.py v2.1.0
 ```
 
-`sources.json` entries look like:
-
-```json
-{
-  "name": "frontend-design",
-  "repository": "anthropics/skills",
-  "path": "skills/frontend-design",
-  "destination": "skills/external/frontend-design",
-  "commit": "<resolved-sha>"
-}
-```
-
-Pin to the resolved SHA after add/sync so installs are reproducible.
-
-## Do / don’t
-
-**Do**
-
-- Keep first-party skills focused; put procedural knowledge in `SKILL.md`
-- Vendor externals only through the scripts so `sources.json` stays accurate
-- Update `skills.sh.json` when adding/removing skills (README stays install-focused, not a skill catalog)
-- Prefer `npx skills add kthaisociety/skills` language in docs (skills.sh install UX)
-
-**Don’t**
-
-- Commit `.agents/`, `.claude/`, `.cursor/`, or `skills-lock.json` (local installs; gitignored)
-- Run `npx skills add other/repo` expecting that to import files into this Git repo
-- Rename a vendored skill folder without updating `sources.json` `destination` / `name`
-
-## Maintainer scripts
+Build and check each agent's plugin tree. Each build writes a git-ignored folder (`.claude-build/`, `.codex-build/`, `.agy-build/`) and each check reads only that folder. The Claude check needs Claude Code installed and the Antigravity check needs `agy` (ADR-0006, ADR-0009).
 
 ```bash
-npm run skill:add -- https://github.com/shadcn/ui --skill shadcn
-npm run skill:add -- https://github.com/vercel-labs/agent-skills --skill vercel-react-best-practices
-npm run skill:remove -- shadcn
-npm run skill:sync
-npm run skill:check
-npm run skills:install
+python3 scripts/build-claude.py build 1.0.0 && python3 scripts/build-claude.py check
+python3 scripts/build-codex.py build 1.0.0 && python3 scripts/build-codex.py check
+python3 scripts/build-agy.py build 1.0.0 && python3 scripts/build-agy.py check
 ```
 
-CI: `.github/workflows/update-external-skills.yml` syncs weekly and opens a PR.
+Copy skills from your clone into one agent, to try them before a release. `AGENT` is `claude`, `codex` or `agy`, and `PLUGIN` is `ais` or `ais-max`:
 
-## Docs to keep in sync
+```bash
+./install.sh AGENT PLUGIN
+```
 
-When adding, removing, or renaming a skill:
+Plan the next version from the commit titles since the last `vX.Y.Z` tag:
 
-1. Skill directory + valid `SKILL.md`
-2. `sources.json` (external only)
-3. [skills.sh.json](./skills.sh.json) groupings
-4. This file if layout or workflow changes
+```bash
+python3 scripts/plan-release.py
+```
 
-## Ecosystem links
+Two workflows run in GitHub Actions:
 
-- Directory: https://www.skills.sh/
-- CLI: https://github.com/vercel-labs/skills
-- Customize repo page: https://skills.sh/docs/customize
+- **Release** (`release.yml`) starts by hand on `main` from the Actions tab. It runs the tests, plans the version, then builds and checks all three trees. Dry run is on by default and changes nothing. Publishing to the release repos isn't set up yet.
+- **Sync ais-max** (`sync-ais-max.yml`) runs daily and by hand. When the newest Custom-skills `vX.Y.Z` tag differs from the one in `ais-max/.source.json`, it syncs, runs the tests and the three checks, and opens a PR (ADR-0011). It needs "Allow GitHub Actions to create and approve pull requests" on, under Settings, Actions, General.
+
+## Commits and PRs
+
+Commit titles follow Conventional Commits, since the release planner bumps the version from them: `!` after any type is a major bump, `feat:` a minor, and anything else a patch.

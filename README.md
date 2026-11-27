@@ -1,155 +1,66 @@
-# @kthais/skills
+# KTHAIS skills
 
-A collection of [Agent Skills](https://www.skills.sh/) for KTHAIS AI coding agents.
+The skills KTHAIS ships to its coding agents, packed as two plugins for Claude Code, Codex and Antigravity.
 
-Skills are reusable capabilities that give agents procedural knowledge for specific tasks. Install them with the [skills CLI](https://github.com/vercel-labs/skills).
+- **ais** is the base plugin. It files tickets and epics, opens PRs, and keeps a repo's glossary, ADRs and PCRs.
+- **ais-max** is an add-on with Max's kanban chain and some writing and explaining extras. It needs **ais** installed first, because its skills call skills that only **ais** ships.
 
-[![skills.sh](https://skills.sh/b/kthaisociety/skills)](https://skills.sh/kthaisociety/skills)
+## Install
 
-## Installation
+Each agent has its own release repo, and that repo's README has the install and update steps for that agent.
 
-```bash
-npx skills add kthaisociety/skills
-```
-
-Install everything non-interactively:
-
-```bash
-npx skills add kthaisociety/skills --all
-```
-
-Or globally:
-
-```bash
-npx skills add kthaisociety/skills --all --global --yes
-```
-
-Install a single skill:
-
-```bash
-npx skills add kthaisociety/skills --skill <skill-name>
-```
-
-List skills in this repo:
-
-```bash
-npx skills add kthaisociety/skills --list
-```
-
-Browse the collection on [skills.sh/kthaisociety/skills](https://skills.sh/kthaisociety/skills).
-
-## Usage
-
-Skills are available to your agent after install. The agent loads them when the task matches a skill description.
-
-## How this repository works
-
-This is a **managed collection**, not a dump of `npx skills add` agent installs.
-
-```text
-Upstream repositories
-        ↓
-sources.json + npm run skill:sync
-        ↓
-kthaisociety/skills (this repo)
-        ↓
-npx skills add kthaisociety/skills --all
-```
-
-| Layer | Role |
+| Agent | Release repo |
 | --- | --- |
-| First-party | Authored here under `skills/internal/<name>/` |
-| External | Vendored into `skills/external/<name>/`, pinned by commit in `sources.json` |
-| Consumers | Install from this GitHub repo with the skills CLI |
+| Claude Code | [kthaisociety/skills-claude](https://github.com/kthaisociety/skills-claude) |
+| Codex | [kthaisociety/skills-codex](https://github.com/kthaisociety/skills-codex) |
+| Antigravity | [kthaisociety/skills-agy](https://github.com/kthaisociety/skills-agy) |
 
-Do **not** populate this repo by running `npx skills add` against other repositories. That installs into agent directories (`.agents/`, `.claude/`, etc.), not into this Git tree.
+Install **ais** first, then **ais-max** if you want it.
 
-See [AGENTS.md](./AGENTS.md) for maintainer guidance.
+## Skills in ais
 
-## Skill layout
+| Skill | What it does |
+| --- | --- |
+| `new-ticket` | Grills standalone work down to what, not how, and files it as a GitHub issue with an effort level. |
+| `map-epic` | Files an epic and grills it into task, research and prototype sub-issues, breadth first. |
+| `pr-ticket` | Pushes a finished branch and rewrites its PR into a body a reviewer can read cold. |
+| `grill-docs` | Grills you on a plan or decision and writes the settled terms, ADRs and PCRs to the repo. |
+| `amend-pcr` | Weighs a change to a project convention record and amends or retires it once you approve. |
 
-Each skill is a directory with a `SKILL.md` (YAML frontmatter + instructions), matching the [skills.sh](https://www.skills.sh/) / Agent Skills format:
+## Skills in ais-max
 
-```text
-skills/
-├── internal/
-│   └── <first-party-skill>/SKILL.md
-└── external/
-    └── <vendored-skill>/
-```
+| Skill | What it does |
+| --- | --- |
+| `brainstorming` | Grills a raw idea until it dies or holds, then names the skill that should pick it up. |
+| `architect-ticket` | Turns a ticket into a red branch of interface stubs and failing acceptance tests. |
+| `implement-ticket` | Fills in the stubs on a red branch until the acceptance tests pass. |
+| `refactor-ticket` | Checks a green branch against its ticket and refactors the code under it. |
+| `unit-test-ticket` | Folds the acceptance tests into the unit suite and tidies the changed tests. |
+| `execute-ticket` | Runs a small ticket from red to refactored in one unattended session. |
+| `review-diff` | Reviews a branch's diff against its ticket and the project records, and fixes what it finds. |
+| `pro-con` | Weighs the pros and cons of a decision and commits to a recommendation. |
+| `unslop` | Cuts AI tells from any writing. |
+| `gloss-me` | Explains each term missing from your personal glossary before using it. |
+| `eli5` | Explains a topic to a curious middle schooler. |
+| `eli10` | Explains a topic to a sharp high schooler. |
+| `talk-to-middleschooler` | Words an explanation for a complete beginner. Other skills call it. |
+| `talk-to-highschooler` | Words an explanation for a capable learner new to the field. Other skills call it. |
+| `helper-skill` | Carries copies of **ais** files the kanban skills read. You never run it. |
 
-The CLI discovers catalog-nested skills under `skills/internal/` and `skills/external/`.
+## Try skills from a clone
 
-## Maintainer commands
-
-```bash
-# Vendor a new external skill (discovers nested paths like skills/productivity/<name>)
-npm run skill:add -- owner/repo skill-name
-npm run skill:add -- https://github.com/owner/repo --skill skill-name
-
-# Override source path when needed
-npm run skill:add -- owner/repo local-name path/to/skill
-
-# Remove a vendored external skill
-npm run skill:remove -- skill-name
-npm run skill:remove -- --skill skill-name
-
-# Update vendored skills to latest upstream commits
-npm run skill:sync
-
-# Check for updates without writing (exit 1 if outdated)
-npm run skill:check
-
-# Install this collection locally (for testing discovery)
-npm run skills:install
-```
-
-Rebuild `ais-max/` from a Custom-skills release tag, and run the script's tests:
+Developers can copy the skills from a local clone into an agent before a release:
 
 ```bash
-python3 scripts/sync-ais-max.py v2.1.0
-python3 -m unittest discover -s tests
-```
-
-Build the Codex marketplace tree into `.codex-build/`, then check it:
-
-```bash
-python3 scripts/build-codex.py build 1.0.0
-python3 scripts/build-codex.py check
-```
-
-Build the Antigravity plugin tree into `.agy-build/`, then check it. The check runs `agy plugin validate --strict` on each plugin, so it needs `agy` installed:
-
-```bash
-python3 scripts/build-agy.py build 1.0.0
-python3 scripts/build-agy.py check
-```
-
-Build the Claude marketplace tree into `.claude-build/`, git-ignored, then check it. The check runs `claude plugin validate`, so it needs `Claude Code` installed:
-
-```bash
-python3 scripts/build-claude.py build 1.0.0
-python3 scripts/build-claude.py check
-```
-
-Copy the skills from your clone into one agent's skills folder to try them before a release. `AGENT` is `claude`, `agy` or `codex`, and `PLUGIN` is `ais` or `ais-max`, which copies `ais` too. Rerun it after each edit, since it copies rather than links. It shows the plan and asks before writing; `--yes` skips the question:
-
-```bash
+git clone https://github.com/kthaisociety/skills.git
+cd skills
 ./install.sh AGENT PLUGIN
 ```
 
-Plan the next release version from the commit titles since the last `vX.Y.Z` tag. It prints `version`, `last_tag` and `source_tag` lines:
+`AGENT` is `claude`, `codex` or `agy`. `PLUGIN` is `ais` or `ais-max`, and `ais-max` copies `ais` too. The script prints what it will add, update and remove, and asks before writing. It copies rather than links, so rerun it after each edit or pull. `./install.sh --help` lists every option.
 
-```bash
-python3 scripts/plan-release.py
-```
-
-The Release workflow, started by hand on `main` from the Actions tab, runs the tests, plans the version, then builds and checks all three trees with it. Dry run is on by default and changes nothing. Publishing isn't set up yet.
-
-A weekly GitHub Action runs `skill:sync` and opens a PR when upstream skills change.
-
-The `Sync ais-max` GitHub Action runs `scripts/scheduled-sync.py` once a day, and by hand from the Actions tab. When the newest `vX.Y.Z` tag on Custom-skills differs from the one `ais-max/.source.json` names, it syncs, runs the tests and the three tree checks, and opens a PR. It needs "Allow GitHub Actions to create and approve pull requests" on, under Settings, Actions, General.
+Maintainers, see [AGENTS.md](./AGENTS.md).
 
 ## License
 
-See [LICENSE](./LICENSE). Vendored skills keep their upstream licenses.
+See [LICENSE](./LICENSE). Skills that came from elsewhere keep their own license file.

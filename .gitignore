@@ -1,4 +1,4 @@
-# Local agent skill installs (not part of this collection)
+# Agent config and skill folders, never committed
 .agents/
 .claude/
 .cursor/
