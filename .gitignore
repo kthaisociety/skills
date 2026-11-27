@@ -5,9 +5,12 @@
 .codex/
 skills-lock.json
 
+
 # Dependencies and junk
 node_modules/
 .DS_Store
 *.log
 __pycache__/
 .codex-build/
+.agy-build/
+.claude-build/
