@@ -7,8 +7,15 @@ day. It decides on tags alone (ADR-0011).
 Usage: python3 scripts/scheduled-sync.py
 """
 
+import argparse
 import importlib.util
+import json
+import os
+import re
+import shlex
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).absolute().parent.parent
@@ -17,6 +24,9 @@ _spec = importlib.util.spec_from_file_location("sync_ais_max", ROOT / "scripts" 
 _sync_ais_max = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_sync_ais_max)
 SOURCE_REPO = _sync_ais_max.SOURCE_REPO
+
+
+_RELEASE_TAG = re.compile(r"v([0-9]+)\.([0-9]+)\.([0-9]+)")
 
 
 class JobError(Exception):
@@ -40,7 +50,28 @@ def latest_tag(repo):
     Raises JobError when git can't list repo's tags, such as an unreachable
     URL or a path that is not a git repo. The message names repo.
     """
-    raise NotImplementedError
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+    try:
+        out = subprocess.run(["git", "ls-remote", "--tags", repo], check=True,
+                             capture_output=True, text=True, env=env).stdout
+    except subprocess.CalledProcessError as error:
+        raise JobError(f"could not list tags of {repo}: {_last_line(error.stderr) or error}")
+    except OSError as error:
+        raise JobError(f"could not run git to list tags of {repo}: {error}")
+
+    best, best_key = None, None
+    for line in out.splitlines():
+        ref = line.split("\t")[-1]
+        if not ref.startswith("refs/tags/"):
+            continue
+        name = ref[len("refs/tags/"):]
+        match = _RELEASE_TAG.fullmatch(name)
+        if not match:
+            continue
+        key = tuple(int(part) for part in match.groups())
+        if best_key is None or key > best_key:
+            best, best_key = name, key
+    return best
 
 
 # The checks a synced ais-max has to pass before the job pushes anything.
@@ -65,6 +96,112 @@ BRANCH_PREFIX = "sync/ais-max-"
 UP_TO_DATE = "up to date"
 OPENED = "opened"
 UPDATED = "updated"
+
+_AUTHOR = ("-c", "user.name=ais-max sync", "-c", "user.email=sync-ais-max@users.noreply.github.com",
+           "-c", "commit.gpgsign=false")
+
+
+def _quiet_env():
+    return dict(os.environ, GIT_TERMINAL_PROMPT="0")
+
+
+def _last_line(text):
+    lines = (text or "").strip().splitlines()
+    return lines[-1] if lines else ""
+
+
+def _git(cwd, *args):
+    """Run git in cwd and return its stdout. Raises JobError naming the git command on failure."""
+    try:
+        return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True,
+                              text=True, env=_quiet_env()).stdout
+    except subprocess.CalledProcessError as error:
+        raise JobError(f"git {' '.join(args[:2])} failed: {_last_line(error.stderr) or error}")
+    except OSError as error:
+        raise JobError(f"could not run git: {error}")
+
+
+def _gh(gh, cwd, *args):
+    """Run the GitHub CLI in cwd and return its stdout. Raises JobError naming the gh command on failure."""
+    try:
+        return subprocess.run([gh, *args], cwd=cwd, check=True, capture_output=True,
+                              text=True, env=_quiet_env()).stdout
+    except subprocess.CalledProcessError as error:
+        raise JobError(f"gh {' '.join(args[:2])} failed: {_last_line(error.stderr) or error}")
+    except OSError as error:
+        raise JobError(f"could not run gh: {error}")
+
+
+def _recorded_tag(root):
+    """Return the tag named in root/ais-max's sync record. Raises JobError if it is missing or names none."""
+    record = root / "ais-max" / _sync_ais_max.RECORD
+    try:
+        data = json.loads(record.read_text())
+    except (OSError, ValueError):
+        raise JobError(f"{record} is missing or not readable JSON")
+    tag = data.get("tag") if isinstance(data, dict) else None
+    if not isinstance(tag, str) or not tag:
+        raise JobError(f"{record} names no tag")
+    return tag
+
+
+def _outside_ais_max(root):
+    """Return every path under root that differs from HEAD, untracked files included, outside ais-max/."""
+    entries = _git(root, "status", "--porcelain", "-z", "--untracked-files=all").split("\0")
+    paths, i = [], 0
+    while i < len(entries):
+        entry = entries[i]
+        i += 1
+        if len(entry) < 4:
+            continue
+        status, path = entry[:2], entry[3:]
+        if "R" in status or "C" in status:
+            i += 1  # a rename or copy is followed by its source path, which is not a separate change
+        if path == "ais-max" or path.startswith("ais-max/"):
+            continue
+        paths.append(path)
+    return paths
+
+
+def _run_checks(checks, root):
+    for command in checks:
+        try:
+            result = subprocess.run(list(command), cwd=root, capture_output=True, text=True)
+        except OSError as error:
+            raise JobError(f"could not run check {shlex.join(command)}: {error}")
+        if result.returncode != 0:
+            raise JobError(f"check failed: {shlex.join(command)}")
+
+
+def _open_prs(gh, root):
+    out = _gh(gh, root, "pr", "list", "--state", "open", "--json", "number,headRefName,url", "--limit", "200")
+    try:
+        return json.loads(out or "[]")
+    except ValueError:
+        raise JobError("gh pr list did not return JSON")
+
+
+def _commit_and_push(root, branch, old, new):
+    """Commit root/ais-max alone on branch, from the checked-out base, and force-push it to origin."""
+    _git(root, "checkout", "-q", "-B", branch)
+    _git(root, "add", "-A", "--", "ais-max")
+    _git(root, *_AUTHOR, "commit", "-q", "-m", f"Sync ais-max from {old} to {new}", "--", "ais-max")
+    _git(root, "push", "-q", "--force", "origin", branch)
+
+
+def _open_pr(gh, root, base, branch, old, new):
+    """Open the sync PR against base and return its URL."""
+    body = (f"Rebuilds ais-max from Custom-skills {new}, replacing {old}.\n\n"
+            "Opened by scripts/scheduled-sync.py when Custom-skills cuts a new release tag.\n")
+    with tempfile.TemporaryDirectory() as scratch:
+        body_file = Path(scratch) / "body.md"
+        body_file.write_text(body)
+        out = _gh(gh, root, "pr", "create", "--base", base, "--head", branch,
+                  "--title", f"Sync ais-max from {old} to {new}", "--body-file", str(body_file))
+    lines = out.strip().splitlines()
+    if not lines:
+        raise JobError("gh pr create printed no PR URL")
+    return lines[-1].strip()
 
 
 def run(repo=SOURCE_REPO, root=ROOT, gh="gh", checks=CHECKS, auto_merge=AUTO_MERGE):
@@ -124,7 +261,47 @@ def run(repo=SOURCE_REPO, root=ROOT, gh="gh", checks=CHECKS, auto_merge=AUTO_MER
     - a command in checks exits non-zero. The message names the command.
     Raises JobError when a git push or gh command fails. The message names it.
     """
-    raise NotImplementedError
+    tag = latest_tag(repo)
+    if tag is None:
+        raise JobError(f"{repo} has no release tag of the form vX.Y.Z")
+    recorded = _recorded_tag(root)
+    if recorded == tag:
+        return UP_TO_DATE
+
+    try:
+        _sync_ais_max.sync(tag, repo=repo, ais=root / "ais", dest=root / "ais-max")
+    except _sync_ais_max.SyncError as error:
+        raise JobError(str(error))
+
+    stray = _outside_ais_max(root)
+    if stray:
+        raise JobError("changes outside ais-max/: " + ", ".join(stray))
+
+    _run_checks(checks, root)
+
+    open_prs = _open_prs(gh, root)
+    base = _git(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
+    if base == "HEAD":
+        raise JobError("root is on a detached HEAD; check out the PR base branch first")
+
+    branch = BRANCH_PREFIX + tag
+    _commit_and_push(root, branch, recorded, tag)
+
+    existing = next((pr for pr in open_prs if pr.get("headRefName") == branch), None)
+    if existing is not None:
+        url, outcome = existing["url"], UPDATED
+    else:
+        url, outcome = _open_pr(gh, root, base, branch, recorded, tag), OPENED
+
+    for pr in open_prs:
+        name = pr.get("headRefName", "")
+        if name.startswith(BRANCH_PREFIX) and name != branch:
+            _gh(gh, root, "pr", "close", str(pr["number"]), "--comment", f"Superseded by {url}")
+            _git(root, "push", "-q", "origin", "--delete", name)
+
+    if auto_merge:
+        _gh(gh, root, "pr", "merge", url, "--auto")
+    return outcome
 
 
 def main(argv=None):
@@ -139,7 +316,19 @@ def main(argv=None):
     - 1 when run() raised JobError, having printed "error: <message>" to stderr.
     - 2 when argv holds any argument, per argparse.
     """
-    raise NotImplementedError
+    parser = argparse.ArgumentParser(description="Sync ais-max to the newest Custom-skills release tag.")
+    try:
+        parser.parse_args(sys.argv[1:] if argv is None else argv)
+    except SystemExit as stop:
+        return stop.code
+
+    try:
+        outcome = run()
+    except JobError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    print(f"Sync ais-max: {outcome}")
+    return 0
 
 
 if __name__ == "__main__":
