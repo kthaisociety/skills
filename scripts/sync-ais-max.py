@@ -117,7 +117,7 @@ def sync(tag, repo=SOURCE_REPO, ais=ROOT / "ais", dest=ROOT / "ais-max"):
         ais_names = {p.name for p in ais.iterdir() if p.is_dir()} if ais.is_dir() else set()
         keep = [path for path in listed if path.name not in ais_names]
 
-        for path in keep:
+        for path in listed:
             if not (source / path).is_dir():
                 raise SyncError(f"skill folder {path.as_posix()} is missing at tag {tag}")
 
