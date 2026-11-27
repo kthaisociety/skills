@@ -105,11 +105,13 @@ def _mention_pattern(names):
     return re.compile(r"(?<![\w./-])/(" + alternatives + r")(?![\w/-]|\.\w)")
 
 
-def _rewrite_mentions(text, owners):
+def _rewrite_mentions(text, owners, prefixed=True):
     if not owners:
         return text
     pattern = _mention_pattern(owners)
-    return pattern.sub(lambda m: f"${owners[m.group(1)]}:{m.group(1)}", text)
+    if prefixed:
+        return pattern.sub(lambda m: f"${owners[m.group(1)]}:{m.group(1)}", text)
+    return pattern.sub(lambda m: f"${m.group(1)}", text)
 
 
 def _check_references(text, plugin, label, owners, sources):
@@ -154,10 +156,11 @@ def _strip_frontmatter(text):
     return "---\n" + "".join(line + "\n" for line in kept) + "---\n" + "\n".join(body), disable
 
 
-def _convert_skill(plugin, skill, owners, sources, files):
+def _convert_skill(plugin, skill, owners, sources, files, prefix=None, prefixed=True):
     """Add one skill's converted files to files, keyed by their path in the tree."""
     skill_src = sources[plugin] / skill
-    prefix = f"{plugin}/skills/{skill}"
+    if prefix is None:
+        prefix = f"{plugin}/skills/{skill}"
     for path in _visible_files(skill_src):
         rel = path.relative_to(skill_src)
         out = f"{prefix}/{rel.as_posix()}"
@@ -166,7 +169,7 @@ def _convert_skill(plugin, skill, owners, sources, files):
             files[out] = path.read_bytes()
             continue
         _check_references(text, plugin, out, owners, sources)
-        text = _rewrite_mentions(text, owners)
+        text = _rewrite_mentions(text, owners, prefixed)
         if rel == Path("SKILL.md"):
             text, disable = _strip_frontmatter(text)
             if disable:
@@ -313,7 +316,13 @@ def build_local(ais=ROOT / "ais", ais_max=ROOT / "ais-max", dest=ROOT / LOCAL_BU
     plugins, or a "../<skill>/<file>" reference to a skill outside the
     referring file's plugin or to a file that doesn't exist.
     """
-    raise NotImplementedError
+    sources = _sources(ais, ais_max)
+    owners = skill_owners(ais, ais_max)
+    files = {}
+    for skill, plugin in owners.items():
+        _convert_skill(plugin, skill, owners, sources, files, prefix=skill, prefixed=False)
+    _write_tree(files, Path(dest))
+    return sorted(owners)
 
 
 def skill_owners(ais=ROOT / "ais", ais_max=ROOT / "ais-max"):
@@ -574,6 +583,15 @@ def main(argv=None):
             print(f"Wrote {len(written[plugin])} skills to {BUILD}/{plugin}")
         return 0
 
+    if args.command == "local":
+        try:
+            written = build_local()
+        except BuildError as error:
+            print(f"error: {error}", file=sys.stderr)
+            return 1
+        print(f"Wrote {len(written)} skills to {LOCAL_BUILD}")
+        return 0
+
     messages = check_tree(ROOT / BUILD if args.tree is None else Path(args.tree))
     if not messages:
         print("Tree passes")
@@ -588,6 +606,7 @@ def _build_parser():
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("build").add_argument("version")
     commands.add_parser("check").add_argument("tree", nargs="?", default=None)
+    commands.add_parser("local")
     return parser
 
 

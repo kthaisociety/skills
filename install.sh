@@ -64,5 +64,262 @@
 
 set -euo pipefail
 
-echo "install.sh: not implemented" >&2
-exit 1
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MARKER=".ais-install"
+
+usage() {
+  cat <<'EOF'
+Usage: ./install.sh [--yes] [AGENT] [PLUGIN]
+
+  AGENT    claude   Claude Code   ~/.claude/skills
+           agy      Antigravity   ~/.gemini/config/skills
+           codex    Codex         ~/.agents/skills
+  PLUGIN   ais      every skill in ais/
+           ais-max  every skill in ais-max/, plus every skill in ais/
+  --yes    apply the plan without asking
+  -h, --help  print this usage and exit
+EOF
+}
+
+die_arg() {
+  echo "error: $1" >&2
+  usage >&2
+  exit 1
+}
+
+agent="" plugin="" yes=0
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help) usage; exit 0 ;;
+    --yes) yes=1 ;;
+    -*) die_arg "unknown flag $arg" ;;
+    *)
+      if [ -z "$agent" ]; then agent="$arg"
+      elif [ -z "$plugin" ]; then plugin="$arg"
+      else die_arg "unexpected argument $arg"
+      fi ;;
+  esac
+done
+
+valid_agent() { case "$1" in claude|agy|codex) return 0 ;; *) return 1 ;; esac; }
+valid_plugin() { case "$1" in ais|ais-max) return 0 ;; *) return 1 ;; esac; }
+
+[ -z "$agent" ] || valid_agent "$agent" || die_arg "unknown agent '$agent'"
+[ -z "$plugin" ] || valid_plugin "$plugin" || die_arg "unknown plugin '$plugin'"
+
+interactive=0
+if [ -t 0 ] && [ -t 1 ]; then interactive=1; fi
+
+# ask <label> <name>...  Sets $answer to one of the listed names.
+ask() {
+  local label="$1" i reply name
+  shift
+  while true; do
+    echo "Choose the $label:"
+    i=1
+    for name in "$@"; do echo "  $i) $name"; i=$((i + 1)); done
+    printf '%s> ' "$label"
+    if ! IFS= read -r reply; then echo >&2; exit 1; fi
+    i=1
+    for name in "$@"; do
+      if [ "$reply" = "$name" ] || [ "$reply" = "$i" ]; then answer="$name"; return 0; fi
+      i=$((i + 1))
+    done
+  done
+}
+
+if [ -z "$agent" ] || [ -z "$plugin" ]; then
+  if [ "$interactive" -eq 0 ]; then
+    echo "error: missing AGENT or PLUGIN" >&2
+    usage >&2
+    exit 1
+  fi
+  if [ -z "$agent" ]; then ask agent claude agy codex; agent="$answer"; fi
+  if [ -z "$plugin" ]; then ask plugin ais ais-max; plugin="$answer"; fi
+fi
+
+case "$agent" in
+  claude) target="$HOME/.claude/skills" ;;
+  agy)    target="$HOME/.gemini/config/skills" ;;
+  codex)  target="$HOME/.agents/skills" ;;
+esac
+
+rc=0
+
+# check_skill <plugin> <skill>: prints what is wrong and returns 1, or returns 0.
+check_skill() {
+  local file="$ROOT/$1/$2/SKILL.md" info name desc
+  [ -f "$file" ] || { echo "SKILL.md is missing"; return 1; }
+  info="$(awk '
+    NR == 1 { if ($0 !~ /^---[ \t\r]*$/) bad = 1; next }
+    bad || done { next }
+    /^---[ \t\r]*$/ { done = 1; next }
+    /^name:/ { v = $0; sub(/^name:[ \t]*/, "", v); gsub(/[\r"\047]/, "", v); sub(/[ \t]+$/, "", v); name = v; indesc = 0; next }
+    /^description:/ { v = $0; sub(/^description:[ \t]*/, "", v); gsub(/\r/, "", v); sub(/[ \t]+$/, "", v); if (v != "" && v != ">" && v != "|" && v != ">-" && v != "|-") desc = 1; indesc = 1; next }
+    indesc && /^[ \t]+[^ \t\r]/ { desc = 1; next }
+    { indesc = 0 }
+    END { print name; print desc + 0 }
+  ' "$file")"
+  name="$(printf '%s\n' "$info" | sed -n 1p)"
+  desc="$(printf '%s\n' "$info" | sed -n 2p)"
+  [ -n "$name" ] || { echo "frontmatter has no name"; return 1; }
+  [ "$desc" = "1" ] || { echo "frontmatter has no description"; return 1; }
+  [ "$name" = "$2" ] || { echo "frontmatter name '$name' differs from the folder name"; return 1; }
+  return 0
+}
+
+# Every skill folder name in this clone, from either plugin.
+clone_skills=""
+for p in ais ais-max; do
+  if [ -d "$ROOT/$p" ]; then
+    for d in "$ROOT/$p"/*/; do
+      [ -d "$d" ] || continue
+      clone_skills="$clone_skills$(basename "$d")"$'\n'
+    done
+  fi
+done
+
+plugins="ais"
+[ "$plugin" = "ais-max" ] && plugins="ais ais-max"
+
+# valid: lines of "<skill> <plugin>", sorted by skill.
+valid=""
+for p in $plugins; do
+  [ -d "$ROOT/$p" ] || { echo "error: $ROOT/$p is not a folder" >&2; exit 1; }
+  for d in "$ROOT/$p"/*/; do
+    [ -d "$d" ] || continue
+    s="$(basename "$d")"
+    if problem="$(check_skill "$p" "$s")"; then
+      valid="$valid$s $p"$'\n'
+    else
+      echo "error: $p/$s: $problem" >&2
+      rc=1
+    fi
+  done
+done
+valid="$(printf '%s' "$valid" | LC_ALL=C sort)"
+
+srcroot=""
+if [ "$agent" = "codex" ]; then
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "error: python3 is needed to build the Codex skills and was not found" >&2
+    exit 1
+  fi
+  if ! build_out="$(cd "$ROOT" && python3 scripts/build-codex.py local 2>&1)"; then
+    echo "error: the Codex build failed" >&2
+    printf '%s\n' "$build_out" >&2
+    exit 1
+  fi
+  srcroot="$ROOT/.codex-local"
+fi
+
+is_ours() { [ -d "$1" ] && [ ! -L "$1" ] && [ -f "$1/$MARKER" ]; }
+
+adds="" updates="" removals=""
+while read -r s p; do
+  [ -n "$s" ] || continue
+  dest="$target/$s"
+  if [ -e "$dest" ] || [ -L "$dest" ]; then
+    if is_ours "$dest"; then
+      updates="$updates$s $p"$'\n'
+    else
+      echo "warning: $dest is not from install.sh, skipping" >&2
+      rc=1
+    fi
+  else
+    adds="$adds$s $p"$'\n'
+  fi
+done <<EOF
+$valid
+EOF
+
+if [ -d "$target" ]; then
+  for d in "$target"/*/; do
+    [ -d "$d" ] || continue
+    d="${d%/}"
+    s="$(basename "$d")"
+    if is_ours "$d" && ! printf '%s' "$clone_skills" | grep -qxF -- "$s"; then
+      removals="$removals$s"$'\n'
+    fi
+  done
+fi
+removals="$(printf '%s' "$removals" | LC_ALL=C sort)"
+
+plan_empty=1
+while read -r s p; do
+  if [ -n "$s" ]; then echo "  + $s"; plan_empty=0; fi
+done <<EOF
+$adds
+EOF
+while read -r s p; do
+  if [ -n "$s" ]; then echo "  ~ $s"; plan_empty=0; fi
+done <<EOF
+$updates
+EOF
+while read -r s; do
+  if [ -n "$s" ]; then echo "  - $s"; plan_empty=0; fi
+done <<EOF
+$removals
+EOF
+
+if [ "$plan_empty" -eq 1 ]; then
+  echo "Nothing to change"
+  exit "$rc"
+fi
+
+if [ "$yes" -eq 0 ]; then
+  if [ "$interactive" -eq 1 ]; then
+    printf 'Apply? [y/N] '
+    reply=""
+    IFS= read -r reply || reply=""
+    case "$reply" in
+      y|Y) ;;
+      *) echo "Nothing written"; exit "$rc" ;;
+    esac
+  else
+    echo "error: not a terminal, pass --yes to apply the plan" >&2
+    exit 1
+  fi
+fi
+
+# copy_skill <source folder> <dest folder>
+copy_skill() {
+  local src="$1" dest="$2" rel
+  mkdir -p "$dest"
+  (cd "$src" && find . -type f ! -path '*/.*') | while IFS= read -r rel; do
+    rel="${rel#./}"
+    mkdir -p "$dest/$(dirname "$rel")"
+    cp "$src/$rel" "$dest/$rel"
+  done
+  : > "$dest/$MARKER"
+}
+
+source_of() {
+  if [ -n "$srcroot" ]; then echo "$srcroot/$1"; else echo "$ROOT/$2/$1"; fi
+}
+
+mkdir -p "$target"
+while read -r s p; do
+  [ -n "$s" ] || continue
+  copy_skill "$(source_of "$s" "$p")" "$target/$s"
+  echo "added $target/$s"
+done <<EOF
+$adds
+EOF
+while read -r s p; do
+  [ -n "$s" ] || continue
+  rm -rf "${target:?}/$s"
+  copy_skill "$(source_of "$s" "$p")" "$target/$s"
+  echo "updated $target/$s"
+done <<EOF
+$updates
+EOF
+while read -r s; do
+  [ -n "$s" ] || continue
+  rm -rf "${target:?}/$s"
+  echo "removed $target/$s"
+done <<EOF
+$removals
+EOF
+
+exit "$rc"
