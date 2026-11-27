@@ -168,11 +168,32 @@ def _write_record(staging, tag, commit):
 
 
 def _replace(dest, staging):
-    """Swap staging in as dest, removing whatever dest held."""
-    if dest.exists():
-        shutil.rmtree(dest)
+    """Swap staging in as dest, removing whatever dest held.
+
+    The new tree is copied beside dest first, then renamed over it, so a
+    failure at any point leaves dest as it was and re-raises the OSError.
+    """
     dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(staging), str(dest))
+    fresh = dest.with_name(f".{dest.name}.new")
+    old = dest.with_name(f".{dest.name}.old")
+    for leftover in (fresh, old):
+        if leftover.exists():
+            shutil.rmtree(leftover)
+    try:
+        shutil.copytree(staging, fresh)
+        if dest.exists():
+            os.replace(dest, old)
+        try:
+            os.replace(fresh, dest)
+        except OSError:
+            if old.exists():
+                os.replace(old, dest)
+            raise
+    finally:
+        if fresh.exists():
+            shutil.rmtree(fresh)
+    if old.exists():
+        shutil.rmtree(old)
 
 
 def main(argv=None):

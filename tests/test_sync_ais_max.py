@@ -336,6 +336,19 @@ class TestSyncStops(SyncCase):
             with self.subTest(tag=tag):
                 self.assert_stops(tag, tag or "tag")
 
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root ignores folder permissions")
+    def test_failed_write_leaves_dest_untouched(self):
+        """When the folder holding dest can't be written, dest is exactly as it was."""
+        self.seed_dest()
+        before = snapshot(self.dest)
+        self.work.chmod(0o555)
+        try:
+            with self.assertRaises(OSError):
+                self.run_sync()
+        finally:
+            self.work.chmod(0o755)
+        self.assertEqual(snapshot(self.dest), before)
+
     def test_tag_that_does_not_exist_stops(self):
         """A well-formed tag the repo doesn't have raises SyncError naming the tag."""
         self.assert_stops("v7.7.7", "v7.7.7")
