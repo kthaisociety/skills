@@ -32,18 +32,27 @@ class BuildError(Exception):
     """A check failed before anything was written. The message says which one."""
 
 
-VERSION_RE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
-KEBAB_RE = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
-FIELD_RE = re.compile(r"([A-Za-z_][\w-]*):(.*)")
-BLOCK_INDICATORS = (">", "|", ">-", "|-", ">+", "|+")
+_VERSION_RE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
+_KEBAB_RE = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
+_FIELD_RE = re.compile(r"([A-Za-z_][\w-]*):(.*)")
+_BLOCK_INDICATORS = (">", "|", ">-", "|-", ">+", "|+")
+_MANIFEST = "plugin.json"
+_SKILLS = "skills"
+_FAILING_SEVERITIES = ("error", "warning")
+_STAGE_PREFIX = ".agy-stage-"
+_TREE_MODE = 0o755
 
 
 def _dump(obj):
     return (json.dumps(obj, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
 
 
+def _is_hidden(name):
+    return name.startswith(".")
+
+
 def _skip_hidden(folder, names):
-    return [name for name in names if name.startswith(".")]
+    return [name for name in names if _is_hidden(name)]
 
 
 def _one_line(text):
@@ -52,8 +61,8 @@ def _one_line(text):
 
 def _check_manifest(tree, plugin):
     """Messages for one plugin.json, and its version when it is valid X.Y.Z, else None."""
-    rel = f"{plugin}/plugin.json"
-    path = tree / plugin / "plugin.json"
+    rel = f"{plugin}/{_MANIFEST}"
+    path = tree / plugin / _MANIFEST
     if not path.is_file():
         return [f"{rel}: missing"], None
     try:
@@ -66,20 +75,22 @@ def _check_manifest(tree, plugin):
     name = data.get("name")
     if name is None:
         messages.append(f"{rel}: no name")
-    elif not isinstance(name, str) or not KEBAB_RE.fullmatch(name):
+    elif not isinstance(name, str) or not _KEBAB_RE.fullmatch(name):
         messages.append(f"{rel}: name {name!r} is not lowercase kebab-case")
     elif name != plugin:
         messages.append(f"{rel}: name {name!r} does not match the folder {plugin!r}")
-    version = data.get("version")
     if "version" not in data:
         messages.append(f"{rel}: no version")
-        version = None
-    elif isinstance(version, str) and VERSION_RE.fullmatch(version):
-        pass
-    else:
+        return messages, None
+    version = data["version"]
+    if not _is_version(version):
         messages.append(f"{rel}: version {version!r} is not X.Y.Z")
-        version = None
+        return messages, None
     return messages, version
+
+
+def _is_version(value):
+    return isinstance(value, str) and bool(_VERSION_RE.fullmatch(value))
 
 
 def _frontmatter_fields(lines):
@@ -92,7 +103,7 @@ def _frontmatter_fields(lines):
                 value, _ = fields[current]
                 fields[current] = (value, True)
             continue
-        match = FIELD_RE.fullmatch(line)
+        match = _FIELD_RE.fullmatch(line)
         if match:
             current = match.group(1)
             fields[current] = (match.group(2).strip().strip("\"'").strip(), False)
@@ -103,7 +114,7 @@ def _frontmatter_fields(lines):
 
 def _check_skill(plugin, folder):
     """Messages for one skill folder's SKILL.md."""
-    rel = f"{plugin}/skills/{folder.name}"
+    rel = f"{plugin}/{_SKILLS}/{folder.name}"
     md = folder / "SKILL.md"
     if not md.is_file():
         return [f"{rel}: no SKILL.md"]
@@ -127,7 +138,7 @@ def _check_skill(plugin, folder):
         messages.append(f"{rel}/SKILL.md: frontmatter has no description")
     else:
         value, block_text = fields["description"]
-        has_text = (value and value not in BLOCK_INDICATORS) or block_text
+        has_text = (value and value not in _BLOCK_INDICATORS) or block_text
         if not has_text:
             messages.append(f"{rel}/SKILL.md: description is empty")
     return messages
@@ -143,7 +154,7 @@ def _agy_findings(plugin, stdout):
         return []
     messages = []
     for finding in report["findings"]:
-        if isinstance(finding, dict) and finding.get("severity") in ("error", "warning"):
+        if isinstance(finding, dict) and finding.get("severity") in _FAILING_SEVERITIES:
             messages.append(_one_line(
                 f"{plugin}/{finding.get('file', '?')}: agy: {finding.get('message', '')}"))
     return messages
@@ -189,7 +200,7 @@ def build_tree(version, ais=ROOT / "ais", ais_max=ROOT / "ais-max", dest=ROOT / 
     Each message is one line naming the check that failed and the version or
     path that failed it.
     """
-    if not isinstance(version, str) or not VERSION_RE.fullmatch(version):
+    if not _is_version(version):
         raise BuildError(f"version {version!r} is not X.Y.Z, with digits only")
     sources = {"ais": Path(ais), "ais-max": Path(ais_max)}
     for plugin in PLUGINS:
@@ -198,32 +209,38 @@ def build_tree(version, ais=ROOT / "ais", ais_max=ROOT / "ais-max", dest=ROOT / 
 
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    stage = Path(tempfile.mkdtemp(prefix=".agy-stage-", dir=dest.parent))
+    stage = Path(tempfile.mkdtemp(prefix=_STAGE_PREFIX, dir=dest.parent))
     try:
-        written = {}
-        for plugin in PLUGINS:
-            plugin_dir = stage / plugin
-            skills_dir = plugin_dir / "skills"
-            skills_dir.mkdir(parents=True)
-            names = sorted(p.name for p in sources[plugin].iterdir()
-                           if p.is_dir() and not p.name.startswith("."))
-            for name in names:
-                shutil.copytree(sources[plugin] / name, skills_dir / name, ignore=_skip_hidden)
-            manifest = {"name": plugin, "version": version,
-                        "displayName": DISPLAY_NAMES[plugin], "description": DESCRIPTIONS[plugin]}
-            (plugin_dir / "plugin.json").write_bytes(_dump(manifest))
-            written[plugin] = names
-
-        if dest.is_dir() and not dest.is_symlink():
-            shutil.rmtree(dest)
-        elif dest.exists() or dest.is_symlink():
-            dest.unlink()
-        stage.chmod(0o755)
-        stage.rename(dest)
+        written = {plugin: _stage_plugin(stage / plugin, plugin, sources[plugin], version)
+                   for plugin in PLUGINS}
+        _replace(dest, stage)
     except BaseException:
         shutil.rmtree(stage, ignore_errors=True)
         raise
     return written
+
+
+def _stage_plugin(plugin_dir, plugin, source, version):
+    """Write one plugin's skills and manifest into plugin_dir, and return its skill names."""
+    skills_dir = plugin_dir / _SKILLS
+    skills_dir.mkdir(parents=True)
+    names = sorted(p.name for p in source.iterdir() if p.is_dir() and not _is_hidden(p.name))
+    for name in names:
+        shutil.copytree(source / name, skills_dir / name, ignore=_skip_hidden)
+    manifest = {"name": plugin, "version": version,
+                "displayName": DISPLAY_NAMES[plugin], "description": DESCRIPTIONS[plugin]}
+    (plugin_dir / _MANIFEST).write_bytes(_dump(manifest))
+    return names
+
+
+def _replace(dest, stage):
+    """Swap the staged tree in at dest, removing whatever dest held."""
+    if dest.is_dir() and not dest.is_symlink():
+        shutil.rmtree(dest)
+    elif dest.exists() or dest.is_symlink():
+        dest.unlink()
+    stage.chmod(_TREE_MODE)
+    stage.rename(dest)
 
 
 def check_tree(tree=ROOT / BUILD, agy="agy"):
@@ -286,6 +303,17 @@ def check_tree(tree=ROOT / BUILD, agy="agy"):
     if not tree.is_dir():
         return [f"{tree}: not an existing folder"]
 
+    messages, present = _check_root(tree)
+    messages += _check_manifests(tree, present)
+    found, skill_names = _check_skills(tree, present)
+    messages += found
+    messages += _check_shared_skills(skill_names)
+    messages += _run_agy(tree, agy)
+    return messages
+
+
+def _check_root(tree):
+    """Messages for the tree root, and the plugins whose folders are present, in PLUGINS order."""
     messages = []
     for entry in sorted(tree.iterdir(), key=lambda p: p.name):
         if entry.name not in PLUGINS:
@@ -297,35 +325,54 @@ def check_tree(tree=ROOT / BUILD, agy="agy"):
             present.append(plugin)
         else:
             messages.append(f"{plugin}: plugin folder is missing")
+    return messages, present
 
+
+def _check_manifests(tree, present):
+    """Messages for each present plugin's manifest, then for versions that disagree."""
+    messages = []
     versions = {}
     for plugin in present:
         found, versions[plugin] = _check_manifest(tree, plugin)
         messages += found
-    if versions.get("ais") and versions.get("ais-max") and versions["ais"] != versions["ais-max"]:
-        messages.append(f"ais-max/plugin.json: version {versions['ais-max']} differs from "
-                        f"version {versions['ais']} in ais")
+    first, second = PLUGINS
+    if versions.get(first) and versions.get(second) and versions[first] != versions[second]:
+        messages.append(f"{second}/{_MANIFEST}: version {versions[second]} differs from "
+                        f"version {versions[first]} in {first}")
+    return messages
 
+
+def _check_skills(tree, present):
+    """Messages for each present plugin's skills, and its skill folder names."""
+    messages = []
     skill_names = {}
     for plugin in present:
-        skills_dir = tree / plugin / "skills"
+        skills_dir = tree / plugin / _SKILLS
         if not skills_dir.is_dir():
-            messages.append(f"{plugin}/skills: missing")
+            messages.append(f"{plugin}/{_SKILLS}: missing")
             skill_names[plugin] = []
             continue
         folders = sorted(p for p in skills_dir.iterdir() if p.is_dir())
         if not folders:
-            messages.append(f"{plugin}/skills: holds no skill folder")
+            messages.append(f"{plugin}/{_SKILLS}: holds no skill folder")
         skill_names[plugin] = [p.name for p in folders]
         for folder in folders:
             messages += _check_skill(plugin, folder)
+    return messages, skill_names
 
-    shared = sorted(set(skill_names.get("ais", [])) & set(skill_names.get("ais-max", [])))
-    for skill in shared:
-        messages.append(f"{skill}: in both ais and ais-max")
 
+def _check_shared_skills(skill_names):
+    """One message per skill folder name found under both plugins."""
+    first, second = PLUGINS
+    shared = sorted(set(skill_names.get(first, [])) & set(skill_names.get(second, [])))
+    return [f"{skill}: in both {first} and {second}" for skill in shared]
+
+
+def _run_agy(tree, agy):
+    """Messages from agy's strict validation of each plugin that has a manifest."""
+    messages = []
     for plugin in PLUGINS:
-        if not (tree / plugin / "plugin.json").is_file():
+        if not (tree / plugin / _MANIFEST).is_file():
             continue
         command = [agy, "plugin", "validate", "--strict", "--json", str(tree / plugin)]
         try:
@@ -341,10 +388,15 @@ def check_tree(tree=ROOT / BUILD, agy="agy"):
         if findings:
             messages += findings
             continue
-        stderr_lines = [line for line in proc.stderr.splitlines() if line.strip()]
-        detail = stderr_lines[-1] if stderr_lines else f"exited with code {proc.returncode}"
-        messages.append(_one_line(f"{plugin}: agy: {detail}"))
+        messages.append(_agy_failure(plugin, proc))
     return messages
+
+
+def _agy_failure(plugin, proc):
+    """One message for a failed agy run whose stdout held no findings."""
+    stderr_lines = [line for line in proc.stderr.splitlines() if line.strip()]
+    detail = stderr_lines[-1] if stderr_lines else f"exited with code {proc.returncode}"
+    return _one_line(f"{plugin}: agy: {detail}")
 
 
 def main(argv=None):
