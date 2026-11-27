@@ -10,6 +10,7 @@ import importlib.util
 import io
 import json
 import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -25,6 +26,7 @@ skill_owners = build_codex.skill_owners
 check_tree = build_codex.check_tree
 main = build_codex.main
 BuildError = build_codex.BuildError
+build_local = build_codex.build_local
 
 POLICY = b"policy:\n  allow_implicit_invocation: false\n"
 MARKETPLACE = Path(".agents/plugins/marketplace.json")
@@ -761,6 +763,177 @@ class TestMain(unittest.TestCase):
     def test_check_with_two_trees_exits_two(self):
         """check with more than one tree exits 2."""
         self.assertEqual(self.run_main("check", "a", "b")[0], 2)
+
+
+class LocalCase(WorkCase):
+
+    def setUp(self):
+        super().setUp()
+        self.dest = self.work / "out" / "local"
+
+    def run_local(self):
+        return build_local(ais=self.ais, ais_max=self.ais_max, dest=self.dest)
+
+
+class TestBuildLocalWrites(LocalCase):
+
+    def test_returns_every_skill_name_sorted(self):
+        """Build_local returns every skill from both plugins, sorted."""
+        self.assertEqual(self.run_local(), ["architect-ticket", "grill-docs", "helper-skill", "new-ticket"])
+
+    def test_writes_skills_flat(self):
+        """Skills from both plugins sit directly inside dest, and nothing else does."""
+        self.run_local()
+        self.assertEqual(sorted(p.name for p in self.dest.iterdir()),
+                         ["architect-ticket", "grill-docs", "helper-skill", "new-ticket"])
+
+    def test_mentions_have_no_plugin_prefix(self):
+        """A /<skill> mention becomes $<skill>."""
+        self.run_local()
+        self.assertIn("Point at $new-ticket.", self.built("architect-ticket", "SKILL.md").read_text())
+
+    def test_mentions_in_other_markdown_files_have_no_prefix(self):
+        """Mentions in every .md file are rewritten, not only SKILL.md."""
+        self.run_local()
+        self.assertEqual(self.built("grill-docs", "FORMAT.md").read_text(), "Then hand back to $new-ticket.\n")
+
+    def test_leaves_unknown_mentions(self):
+        """A /<word> that names no skill stays as written."""
+        self.run_local()
+        self.assertIn("Leave /not-a-skill alone.", self.built("architect-ticket", "SKILL.md").read_text())
+
+    def test_frontmatter_keeps_only_name_and_description(self):
+        """SKILL.md frontmatter keeps only name and description."""
+        self.run_local()
+        text = self.built("architect-ticket", "SKILL.md").read_text()
+        self.assertTrue(text.startswith(
+            "---\nname: architect-ticket\ndescription: The architect-ticket skill.\n---\n"), text)
+
+    def test_blocks_implicit_invocation_where_disabled(self):
+        """Disable-model-invocation: true gives agents/openai.yaml."""
+        self.run_local()
+        self.assertEqual(self.built("new-ticket", "agents", "openai.yaml").read_bytes(), POLICY)
+
+    def test_no_policy_file_where_invocation_is_allowed(self):
+        """A skill without the flag gets no agents/openai.yaml."""
+        self.run_local()
+        self.assertFalse(self.built("grill-docs", "agents").exists())
+
+    def test_copies_binary_files_byte_for_byte(self):
+        """Non-markdown files are copied unchanged."""
+        self.run_local()
+        self.assertEqual(self.built("grill-docs", "LICENSE").read_bytes(), b"\x00\x01binary licence\xff")
+
+    def test_skips_hidden_files_and_folders(self):
+        """Nothing on a hidden path reaches dest."""
+        self.run_local()
+        self.assertEqual([p for p in self.dest.rglob(".*")], [])
+
+    def test_writes_no_manifests(self):
+        """Dest holds no marketplace or plugin manifest."""
+        self.run_local()
+        self.assertEqual(list(self.dest.rglob("*.json")), [])
+
+    def test_replaces_an_earlier_dest(self):
+        """A folder already at dest is replaced."""
+        write(self.dest / "stale" / "file.md", "from an older build\n")
+        self.run_local()
+        self.assertFalse(self.built("stale").exists())
+
+    def test_rerun_is_byte_identical(self):
+        """Two runs on the same inputs leave dest identical."""
+        self.run_local()
+        first = snapshot(self.dest)
+        self.run_local()
+        self.assertEqual(snapshot(self.dest), first)
+
+    def test_writes_nothing_outside_dest(self):
+        """Only dest changes, apart from deleted temp files."""
+        before = {k: v for k, v in snapshot(self.work).items() if not k.startswith(("out", "scratch"))}
+        self.run_local()
+        after = {k: v for k, v in snapshot(self.work).items() if not k.startswith(("out", "scratch"))}
+        self.assertEqual((after, list(self.scratch.iterdir())), (before, []))
+
+
+class TestBuildLocalRefuses(LocalCase):
+
+    def assert_refused(self):
+        write(self.dest / "keep.md", "untouched\n")
+        before = snapshot(self.dest)
+        with self.assertRaises(BuildError):
+            self.run_local()
+        self.assertEqual(snapshot(self.dest), before)
+
+    def test_refuses_a_missing_ais_folder(self):
+        """A missing ais folder raises BuildError and leaves dest alone."""
+        shutil.rmtree(self.ais)
+        self.assert_refused()
+
+    def test_refuses_a_missing_ais_max_folder(self):
+        """A missing ais-max folder raises BuildError and leaves dest alone."""
+        shutil.rmtree(self.ais_max)
+        self.assert_refused()
+
+    def test_refuses_a_skill_in_both_plugins(self):
+        """A skill in both plugins raises BuildError and leaves dest alone."""
+        write(self.ais_max / "grill-docs" / "SKILL.md", skill_md("grill-docs"))
+        self.assert_refused()
+
+    def test_refuses_a_reference_into_the_other_plugin(self):
+        """A ../ reference across plugins is refused even though dest is flat."""
+        write(self.ais_max / "helper-skill" / "x.md", "See ../grill-docs/FORMAT.md.\n")
+        self.assert_refused()
+
+    def test_refuses_a_reference_to_a_missing_file(self):
+        """A ../ reference to a missing file raises BuildError."""
+        write(self.ais_max / "helper-skill" / "x.md", "See ../architect-ticket/nope.md.\n")
+        self.assert_refused()
+
+
+class TestMainLocal(unittest.TestCase):
+    """main(["local"]) builds into the real ROOT / .codex-local."""
+
+    def setUp(self):
+        self.local = ROOT / ".codex-local"
+        self.had_local = self.local.exists()
+        self.release = ROOT / ".codex-build"
+
+    def tearDown(self):
+        if not self.had_local and self.local.exists():
+            shutil.rmtree(self.local)
+
+    def run_main(self, argv):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = main(argv)
+        return code, out.getvalue(), err.getvalue()
+
+    def test_local_reports_what_it_wrote(self):
+        """`local` exits 0 and prints the skill count and folder."""
+        count = len(skill_owners())
+        self.assertEqual(self.run_main(["local"])[:2], (0, f"Wrote {count} skills to .codex-local\n"))
+
+    def test_local_writes_into_codex_local(self):
+        """`local` writes every skill into ROOT/.codex-local."""
+        self.run_main(["local"])
+        self.assertEqual(sorted(p.name for p in self.local.iterdir()), sorted(skill_owners()))
+
+    def test_local_leaves_the_release_tree_alone(self):
+        """A local build never touches .codex-build."""
+        before = snapshot(self.release)
+        code = self.run_main(["local"])[0]
+        self.assertEqual((code, snapshot(self.release)), (0, before))
+
+    def test_local_takes_no_arguments(self):
+        """`local` with an argument is a usage error naming the extra argument."""
+        code, _, err = self.run_main(["local", "1.0.0"])
+        self.assertEqual((code, "unrecognized arguments: 1.0.0" in err), (2, True))
+
+    def test_local_folder_is_git_ignored(self):
+        """Git ignores .codex-local, so a local build never shows in a diff."""
+        result = subprocess.run(["git", "check-ignore", "-q", ".codex-local/x/SKILL.md"],
+                                cwd=ROOT, capture_output=True)
+        self.assertEqual(result.returncode, 0)
 
 
 if __name__ == "__main__":

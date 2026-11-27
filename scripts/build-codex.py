@@ -3,6 +3,7 @@
 
 Usage: python3 scripts/build-codex.py build 1.0.0
        python3 scripts/build-codex.py check [TREE]
+       python3 scripts/build-codex.py local
 """
 
 import argparse
@@ -14,6 +15,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).absolute().parent.parent
 BUILD = ".codex-build"
+LOCAL_BUILD = ".codex-local"
 MARKETPLACE_FILE = ".agents/plugins/marketplace.json"
 POLICY_TEXT = "policy:\n  allow_implicit_invocation: false\n"
 VERSION_RE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
@@ -103,11 +105,13 @@ def _mention_pattern(names):
     return re.compile(r"(?<![\w./-])/(" + alternatives + r")(?![\w/-]|\.\w)")
 
 
-def _rewrite_mentions(text, owners):
+def _rewrite_mentions(text, owners, mention):
+    """Return text with each "/<skill>" mention of a skill in owners replaced
+    by mention(skill)."""
     if not owners:
         return text
     pattern = _mention_pattern(owners)
-    return pattern.sub(lambda m: f"${owners[m.group(1)]}:{m.group(1)}", text)
+    return pattern.sub(lambda m: mention(m.group(1)), text)
 
 
 def _check_references(text, plugin, label, owners, sources):
@@ -152,10 +156,11 @@ def _strip_frontmatter(text):
     return "---\n" + "".join(line + "\n" for line in kept) + "---\n" + "\n".join(body), disable
 
 
-def _convert_skill(plugin, skill, owners, sources, files):
-    """Add one skill's converted files to files, keyed by their path in the tree."""
+def _convert_skill(plugin, skill, owners, sources, files, prefix, mention):
+    """Add one skill's converted files to files, keyed by their path in the tree:
+    prefix, then the file's path inside the skill. Each skill mention becomes
+    mention(skill), per _rewrite_mentions."""
     skill_src = sources[plugin] / skill
-    prefix = f"{plugin}/skills/{skill}"
     for path in _visible_files(skill_src):
         rel = path.relative_to(skill_src)
         out = f"{prefix}/{rel.as_posix()}"
@@ -164,7 +169,7 @@ def _convert_skill(plugin, skill, owners, sources, files):
             files[out] = path.read_bytes()
             continue
         _check_references(text, plugin, out, owners, sources)
-        text = _rewrite_mentions(text, owners)
+        text = _rewrite_mentions(text, owners, mention)
         if rel == Path("SKILL.md"):
             text, disable = _strip_frontmatter(text)
             if disable:
@@ -272,12 +277,53 @@ def build_tree(version, ais=ROOT / "ais", ais_max=ROOT / "ais-max", dest=ROOT / 
     for plugin in PLUGINS:
         written[plugin] = sorted(name for name, owner in owners.items() if owner == plugin)
         for skill in written[plugin]:
-            _convert_skill(plugin, skill, owners, sources, files)
+            _convert_skill(plugin, skill, owners, sources, files, f"{plugin}/skills/{skill}",
+                           lambda name: f"${owners[name]}:{name}")
     files[MARKETPLACE_FILE] = _json_bytes(_marketplace())
     for name in PLUGINS:
         files[f"{name}/.codex-plugin/plugin.json"] = _json_bytes(_manifest(name, version))
     _write_tree(files, dest)
     return written
+
+
+def build_local(ais=ROOT / "ais", ais_max=ROOT / "ais-max", dest=ROOT / LOCAL_BUILD):
+    """Write every ais and ais-max skill, converted for Codex, flat into dest,
+    for install.sh to copy. Replaces any folder already at dest.
+
+    ais: Path, default ROOT / "ais". The ais plugin folder. Read, never written.
+    ais_max: Path, default ROOT / "ais-max". The ais-max plugin folder. Read,
+        never written.
+    dest: Path, default ROOT / LOCAL_BUILD, which git ignores. The folder this
+        call replaces. Never ROOT / BUILD, so a local build and a release
+        build never touch each other's output.
+
+    Returns a list of every skill folder name written, sorted.
+
+    On success dest holds, and holds only, one folder <skill>/ per skill in
+    skill_owners, from either plugin, converted as build_tree converts it,
+    with one difference: each "/<skill>" mention of a skill in either plugin
+    becomes "$<skill>", with no plugin prefix. So hidden files and folders
+    are left out, SKILL.md's frontmatter keeps only "name" and
+    "description", a skill with "disable-model-invocation: true" gets
+    agents/openai.yaml, and every other file is copied byte for byte. dest
+    holds no marketplace or plugin manifest.
+
+    Running it twice with the same inputs leaves dest byte-identical. Writes
+    nothing outside dest, apart from temporary files it deletes before
+    returning.
+
+    Raises BuildError, with dest untouched, in the cases build_tree raises
+    for, other than the version: a missing plugin folder, a skill in both
+    plugins, or a "../<skill>/<file>" reference to a skill outside the
+    referring file's plugin or to a file that doesn't exist.
+    """
+    sources = _sources(ais, ais_max)
+    owners = skill_owners(ais, ais_max)
+    files = {}
+    for skill, plugin in owners.items():
+        _convert_skill(plugin, skill, owners, sources, files, skill, lambda name: f"${name}")
+    _write_tree(files, Path(dest))
+    return sorted(owners)
 
 
 def skill_owners(ais=ROOT / "ais", ais_max=ROOT / "ais-max"):
@@ -503,12 +549,17 @@ def main(argv=None):
         ["build", VERSION]   build_tree(VERSION) with the default folders.
         ["check"]            check_tree() on ROOT / BUILD.
         ["check", TREE]      check_tree(Path(TREE)).
+        ["local"]            build_local() with the default folders.
 
     Returns the process exit code as an int, and never raises BuildError:
     - build, 0 after a build, having printed one line per plugin to stdout,
       in PLUGINS order, as "Wrote <count> skills to <BUILD>/<plugin>".
     - build, 1 when build_tree raised BuildError, having printed
       "error: <message>" to stderr. The build folder is then as it was.
+    - local, 0 after a local build, having printed
+      "Wrote <count> skills to <LOCAL_BUILD>" to stdout.
+    - local, 1 when build_local raised BuildError, having printed
+      "error: <message>" to stderr. The local folder is then as it was.
     - check, 0 when check_tree returned no messages, having printed
       "Tree passes" to stdout.
     - check, 1 when it returned messages, having printed each one on its
@@ -533,6 +584,15 @@ def main(argv=None):
             print(f"Wrote {len(written[plugin])} skills to {BUILD}/{plugin}")
         return 0
 
+    if args.command == "local":
+        try:
+            written = build_local()
+        except BuildError as error:
+            print(f"error: {error}", file=sys.stderr)
+            return 1
+        print(f"Wrote {len(written)} skills to {LOCAL_BUILD}")
+        return 0
+
     messages = check_tree(ROOT / BUILD if args.tree is None else Path(args.tree))
     if not messages:
         print("Tree passes")
@@ -547,6 +607,7 @@ def _build_parser():
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("build").add_argument("version")
     commands.add_parser("check").add_argument("tree", nargs="?", default=None)
+    commands.add_parser("local")
     return parser
 
 

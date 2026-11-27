@@ -14,3 +14,4 @@ __pycache__/
 .codex-build/
 .agy-build/
 .claude-build/
+.codex-local/
