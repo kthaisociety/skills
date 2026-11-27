@@ -3,6 +3,7 @@
 
 Usage: python3 scripts/build-codex.py build 1.0.0
        python3 scripts/build-codex.py check [TREE]
+       python3 scripts/build-codex.py local
 """
 
 import argparse
@@ -14,6 +15,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).absolute().parent.parent
 BUILD = ".codex-build"
+LOCAL_BUILD = ".codex-local"
 MARKETPLACE_FILE = ".agents/plugins/marketplace.json"
 POLICY_TEXT = "policy:\n  allow_implicit_invocation: false\n"
 VERSION_RE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
@@ -280,6 +282,40 @@ def build_tree(version, ais=ROOT / "ais", ais_max=ROOT / "ais-max", dest=ROOT / 
     return written
 
 
+def build_local(ais=ROOT / "ais", ais_max=ROOT / "ais-max", dest=ROOT / LOCAL_BUILD):
+    """Write every ais and ais-max skill, converted for Codex, flat into dest,
+    for install.sh to copy. Replaces any folder already at dest.
+
+    ais: Path, default ROOT / "ais". The ais plugin folder. Read, never written.
+    ais_max: Path, default ROOT / "ais-max". The ais-max plugin folder. Read,
+        never written.
+    dest: Path, default ROOT / LOCAL_BUILD, which git ignores. The folder this
+        call replaces. Never ROOT / BUILD, so a local build and a release
+        build never touch each other's output.
+
+    Returns a list of every skill folder name written, sorted.
+
+    On success dest holds, and holds only, one folder <skill>/ per skill in
+    skill_owners, from either plugin, converted as build_tree converts it,
+    with one difference: each "/<skill>" mention of a skill in either plugin
+    becomes "$<skill>", with no plugin prefix. So hidden files and folders
+    are left out, SKILL.md's frontmatter keeps only "name" and
+    "description", a skill with "disable-model-invocation: true" gets
+    agents/openai.yaml, and every other file is copied byte for byte. dest
+    holds no marketplace or plugin manifest.
+
+    Running it twice with the same inputs leaves dest byte-identical. Writes
+    nothing outside dest, apart from temporary files it deletes before
+    returning.
+
+    Raises BuildError, with dest untouched, in the cases build_tree raises
+    for, other than the version: a missing plugin folder, a skill in both
+    plugins, or a "../<skill>/<file>" reference to a skill outside the
+    referring file's plugin or to a file that doesn't exist.
+    """
+    raise NotImplementedError
+
+
 def skill_owners(ais=ROOT / "ais", ais_max=ROOT / "ais-max"):
     """Return which plugin owns each skill, read from the plugin source folders.
 
@@ -503,12 +539,17 @@ def main(argv=None):
         ["build", VERSION]   build_tree(VERSION) with the default folders.
         ["check"]            check_tree() on ROOT / BUILD.
         ["check", TREE]      check_tree(Path(TREE)).
+        ["local"]            build_local() with the default folders.
 
     Returns the process exit code as an int, and never raises BuildError:
     - build, 0 after a build, having printed one line per plugin to stdout,
       in PLUGINS order, as "Wrote <count> skills to <BUILD>/<plugin>".
     - build, 1 when build_tree raised BuildError, having printed
       "error: <message>" to stderr. The build folder is then as it was.
+    - local, 0 after a local build, having printed
+      "Wrote <count> skills to <LOCAL_BUILD>" to stdout.
+    - local, 1 when build_local raised BuildError, having printed
+      "error: <message>" to stderr. The local folder is then as it was.
     - check, 0 when check_tree returned no messages, having printed
       "Tree passes" to stdout.
     - check, 1 when it returned messages, having printed each one on its
