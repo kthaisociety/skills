@@ -142,6 +142,8 @@ The Release workflow, started by hand on `main` from the Actions tab, runs the t
 
 A weekly GitHub Action runs `skill:sync` and opens a PR when upstream skills change.
 
+The `Sync ais-max` GitHub Action runs `scripts/scheduled-sync.py` once a day, and by hand from the Actions tab. When the newest `vX.Y.Z` tag on Custom-skills differs from the one `ais-max/.source.json` names, it syncs, runs the tests and the three tree checks, and opens a PR. It needs "Allow GitHub Actions to create and approve pull requests" on, under Settings, Actions, General.
+
 ## License
 
 See [LICENSE](./LICENSE). Vendored skills keep their upstream licenses.
