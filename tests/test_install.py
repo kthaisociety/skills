@@ -1,16 +1,10 @@
-"""Acceptance tests for #11: install ais and ais-max from a local clone.
+"""Tests for install.sh, which copies the ais and ais-max skills from a clone into an agent's skills folder.
 
-The install.sh tests copy install.sh and scripts/build-codex.py into a fake
-clone in a temp folder, beside fake ais/ and ais-max/ folders, and run it with
-HOME pointed at a temp home. Terminal runs go through a pseudo-terminal.
-
-The build_local tests build from fake ais/ and ais-max/ folders, as
-tests/test_build_codex.py does.
+The tests copy install.sh and scripts/build-codex.py into a fake clone in a
+temp folder, beside fake ais/ and ais-max/ folders, and run it with HOME
+pointed at a temp home. Terminal runs go through a pseudo-terminal.
 """
 
-import contextlib
-import importlib.util
-import io
 import os
 import pty
 import select
@@ -24,10 +18,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 INSTALL = ROOT / "install.sh"
 BUILD_CODEX = ROOT / "scripts" / "build-codex.py"
-
-spec = importlib.util.spec_from_file_location("build_codex_acceptance", BUILD_CODEX)
-build_codex = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(build_codex)
 
 POLICY = b"policy:\n  allow_implicit_invocation: false\n"
 MARKER = ".ais-install"
@@ -78,9 +68,6 @@ def visible_files(folder):
     return {p.relative_to(folder).as_posix(): p.read_bytes()
             for p in sorted(folder.rglob("*"))
             if p.is_file() and not any(part.startswith(".") for part in p.relative_to(folder).parts)}
-
-
-# ---------------------------------------------------------------- install.sh
 
 
 class InstallCase(unittest.TestCase):
@@ -182,58 +169,58 @@ class InstallCase(unittest.TestCase):
 class TestInstallCopies(InstallCase):
 
     def test_copies_every_ais_skill_into_the_claude_folder(self):
-        """Behaviour 3: choosing ais copies every ais skill into ~/.claude/skills."""
+        """Choosing ais copies every ais skill into ~/.claude/skills."""
         self.install("claude", "ais")
         self.assertEqual(self.skills_in(self.claude), ["grill-docs", "new-ticket"])
 
     def test_copies_every_ais_skill_into_the_antigravity_folder(self):
-        """Behaviour 3: the agy agent's skills folder is ~/.gemini/config/skills."""
+        """The agy agent's skills folder is ~/.gemini/config/skills."""
         self.install("agy", "ais")
         self.assertEqual(self.skills_in(self.agy), ["grill-docs", "new-ticket"])
 
     def test_a_copy_holds_the_source_skill_files(self):
-        """Behaviour 3: a copy holds every visible file of its source skill, byte for byte."""
+        """A copy holds every visible file of its source skill, byte for byte."""
         self.install("claude", "ais")
         self.assertEqual(visible_files(self.claude / "grill-docs"), visible_files(self.ais / "grill-docs"))
 
     def test_a_copy_is_not_a_symlink(self):
-        """ADR-0011: the skill folder is a real copy, never a symlink into the clone."""
+        """The skill folder is a real copy, never a symlink into the clone."""
         self.install("claude", "ais")
         self.assertFalse((self.claude / "new-ticket").is_symlink())
 
     def test_a_copy_has_no_symlinked_files(self):
-        """ADR-0011: no file in a copy links back into the clone."""
+        """No file in a copy links back into the clone."""
         self.install("claude", "ais")
         self.assertEqual([p for p in (self.claude / "grill-docs").rglob("*") if p.is_symlink()], [])
 
     def test_ais_leaves_out_ais_max_skills(self):
-        """Behaviour 3: choosing ais copies no ais-max skill."""
+        """Choosing ais copies no ais-max skill."""
         self.install("claude", "ais")
         self.assertFalse((self.claude / "architect-ticket").exists())
 
     def test_ais_max_copies_its_own_skills(self):
-        """Behaviour 3: choosing ais-max copies every ais-max skill."""
+        """Choosing ais-max copies every ais-max skill."""
         self.install("claude", "ais-max")
         self.assertTrue({"architect-ticket", "helper-skill"} <= set(self.skills_in(self.claude)))
 
     def test_ais_max_copies_ais_as_well(self):
-        """Behaviour 4: choosing ais-max copies every ais skill too."""
+        """Choosing ais-max copies every ais skill too."""
         self.install("claude", "ais-max")
         self.assertEqual(self.skills_in(self.claude),
                          ["architect-ticket", "grill-docs", "helper-skill", "new-ticket"])
 
     def test_yes_may_come_after_the_arguments(self):
-        """Usage: --yes works after AGENT and PLUGIN."""
+        """--yes works after AGENT and PLUGIN."""
         result = self.run_install("claude", "ais", "--yes")
         self.assertEqual((result.returncode, self.skills_in(self.claude)), (0, ["grill-docs", "new-ticket"]))
 
     def test_writes_nothing_outside_the_agent_folder(self):
-        """Behaviour 3: a claude install leaves the other agents' folders alone."""
+        """A claude install leaves the other agents' folders alone."""
         self.install("claude", "ais")
         self.assertEqual(self.skills_in(self.home), [".claude"])
 
     def test_leaves_the_clone_untouched(self):
-        """Behaviour 3: installing reads the plugin folders and never writes them."""
+        """Installing reads the plugin folders and never writes them."""
         before = (snapshot(self.ais), snapshot(self.ais_max))
         self.install("claude", "ais-max")
         self.assertEqual((snapshot(self.ais), snapshot(self.ais_max)), before)
@@ -242,22 +229,22 @@ class TestInstallCopies(InstallCase):
 class TestInstallHiddenFiles(InstallCase):
 
     def test_skips_hidden_files_in_a_skill(self):
-        """Bullet: hidden files in a skill folder are never copied."""
+        """Hidden files in a skill folder are never copied."""
         self.install("claude", "ais-max")
         self.assertFalse((self.claude / "helper-skill" / ".hidden").exists())
 
     def test_skips_hidden_folders_in_a_skill(self):
-        """Bullet: hidden folders in a skill folder are never copied."""
+        """Hidden folders in a skill folder are never copied."""
         self.install("claude", "ais-max")
         self.assertFalse((self.claude / "helper-skill" / ".hidden-dir").exists())
 
     def test_skips_hidden_skill_folders(self):
-        """Bullet: a plugin folder whose name starts with "." is not a skill."""
+        """A plugin folder whose name starts with "." is not a skill."""
         self.install("claude", "ais-max")
         self.assertFalse((self.claude / ".hidden-skill").exists())
 
     def test_sync_record_is_never_copied(self):
-        """Bullet: ais-max/.source.json never reaches the agent folder."""
+        """Ais-max/.source.json never reaches the agent folder."""
         self.install("claude", "ais-max")
         self.assertEqual(list(self.claude.rglob(".source.json")), [])
 
@@ -265,21 +252,21 @@ class TestInstallHiddenFiles(InstallCase):
 class TestInstallRefresh(InstallCase):
 
     def test_rerun_copies_a_source_edit(self):
-        """Behaviour 3: a rerun replaces an earlier copy with the current source."""
+        """A rerun replaces an earlier copy with the current source."""
         self.install("claude", "ais")
         write(self.ais / "grill-docs" / "FORMAT.md", "Edited in the clone.\n")
         self.install("claude", "ais")
         self.assertEqual((self.claude / "grill-docs" / "FORMAT.md").read_text(), "Edited in the clone.\n")
 
     def test_replaced_copy_keeps_nothing_from_the_earlier_one(self):
-        """Behaviour 3: a file deleted from the source is gone from the copy after a rerun."""
+        """A file deleted from the source is gone from the copy after a rerun."""
         self.install("claude", "ais")
         (self.ais / "grill-docs" / "FORMAT.md").unlink()
         self.install("claude", "ais")
         self.assertFalse((self.claude / "grill-docs" / "FORMAT.md").exists())
 
     def test_rerun_overwrites_an_edit_made_in_the_copy(self):
-        """Q6: editing an installed copy in place does not survive a rerun."""
+        """Editing an installed copy in place does not survive a rerun."""
         self.install("claude", "ais")
         write(self.claude / "grill-docs" / "SKILL.md", "edited in place\n")
         self.install("claude", "ais")
@@ -287,7 +274,7 @@ class TestInstallRefresh(InstallCase):
                          (self.ais / "grill-docs" / "SKILL.md").read_bytes())
 
     def test_replaces_a_copy_another_clone_wrote(self):
-        """Ownership: any folder holding .ais-install is ours, whichever clone wrote it."""
+        """Any folder holding .ais-install is ours, whichever clone wrote it."""
         write(self.claude / "grill-docs" / MARKER, "")
         write(self.claude / "grill-docs" / "SKILL.md", "from another clone\n")
         self.install("claude", "ais")
@@ -295,14 +282,14 @@ class TestInstallRefresh(InstallCase):
                          (self.ais / "grill-docs" / "SKILL.md").read_bytes())
 
     def test_removes_the_copy_of_a_deleted_skill(self):
-        """Behaviour 5: a copy whose skill left the clone is removed on the next run."""
+        """A copy whose skill left the clone is removed on the next run."""
         self.install("claude", "ais")
         shutil.rmtree(self.ais / "grill-docs")
         self.install("claude", "ais")
         self.assertFalse((self.claude / "grill-docs").exists())
 
     def test_removes_the_copy_of_a_renamed_skill(self):
-        """Behaviour 5: a rename leaves only the new name's copy."""
+        """A rename leaves only the new name's copy."""
         self.install("claude", "ais")
         (self.ais / "grill-docs").rename(self.ais / "grill-plan")
         write(self.ais / "grill-plan" / "SKILL.md", skill_md("grill-plan"))
@@ -310,20 +297,20 @@ class TestInstallRefresh(InstallCase):
         self.assertEqual(self.skills_in(self.claude), ["grill-plan", "new-ticket"])
 
     def test_prunes_a_dead_copy_from_the_plugin_not_chosen(self):
-        """Behaviour 5: an ais run removes a dead ais-max copy too."""
+        """An ais run removes a dead ais-max copy too."""
         self.install("claude", "ais-max")
         shutil.rmtree(self.ais_max / "helper-skill")
         self.install("claude", "ais")
         self.assertFalse((self.claude / "helper-skill").exists())
 
     def test_keeps_copies_from_the_plugin_not_chosen(self):
-        """Behaviour 5: an ais run keeps ais-max copies whose skills still exist."""
+        """An ais run keeps ais-max copies whose skills still exist."""
         self.install("claude", "ais-max")
         self.install("claude", "ais")
         self.assertTrue((self.claude / "architect-ticket" / "SKILL.md").is_file())
 
     def test_keeps_a_folder_it_did_not_write(self):
-        """Bullet: a folder without .ais-install is never removed, even under a dead name."""
+        """A folder without .ais-install is never removed, even under a dead name."""
         write(self.claude / "my-own-skill" / "SKILL.md", skill_md("my-own-skill"))
         self.install("claude", "ais")
         self.assertTrue((self.claude / "my-own-skill" / "SKILL.md").is_file())
@@ -335,39 +322,39 @@ class TestInstallForeignFolders(InstallCase):
         write(self.claude / "grill-docs" / "SKILL.md", "my own grill-docs\n")
 
     def test_leaves_a_foreign_folder_in_the_way_untouched(self):
-        """Bullet: a folder it didn't write, under a skill's name, keeps its contents."""
+        """A folder it didn't write, under a skill's name, keeps its contents."""
         self.seed_foreign()
         self.run_install("--yes", "claude", "ais")
         self.assertEqual(((self.claude / "grill-docs" / "SKILL.md").read_text(), (self.claude / "new-ticket").is_dir()),
                          ("my own grill-docs\n", True))
 
     def test_warns_about_a_foreign_folder_in_the_way(self):
-        """Bullet: the skipped folder is named in a warning on stderr."""
+        """The skipped folder is named in a warning on stderr."""
         self.seed_foreign()
         result = self.run_install("--yes", "claude", "ais")
         self.assertIn(f"warning: {self.claude / 'grill-docs'} is not from install.sh, skipping", result.stderr)
 
     def test_still_copies_the_other_skills(self):
-        """Bullet: one foreign folder doesn't stop the other skills."""
+        """One foreign folder doesn't stop the other skills."""
         self.seed_foreign()
         self.run_install("--yes", "claude", "ais")
         self.assertTrue((self.claude / "new-ticket" / "SKILL.md").is_file())
 
     def test_exits_1_after_skipping_a_foreign_folder(self):
-        """Bullet: skipping a folder fails the run, after copying the rest."""
+        """Skipping a folder fails the run, after copying the rest."""
         self.seed_foreign()
         result = self.run_install("--yes", "claude", "ais")
         self.assertEqual((result.returncode, (self.claude / "new-ticket").is_dir()), (1, True))
 
     def test_a_foreign_file_in_the_way_is_left_alone(self):
-        """Bullet: a plain file under a skill's name is skipped, not replaced."""
+        """A plain file under a skill's name is skipped, not replaced."""
         write(self.claude / "grill-docs", "a file, not a folder\n")
         self.run_install("--yes", "claude", "ais")
         self.assertEqual(((self.claude / "grill-docs").read_text(), (self.claude / "new-ticket").is_dir()),
                          ("a file, not a folder\n", True))
 
     def test_a_foreign_symlink_in_the_way_is_left_alone(self):
-        """Bullet: a symlink under a skill's name, such as one the Custom-skills installer left, stays."""
+        """A symlink under a skill's name, such as one the Custom-skills installer left, stays."""
         elsewhere = self.work / "elsewhere"
         write(elsewhere / "SKILL.md", "elsewhere\n")
         self.claude.mkdir(parents=True)
@@ -380,49 +367,49 @@ class TestInstallForeignFolders(InstallCase):
 class TestInstallInvalidSkills(InstallCase):
 
     def test_skips_a_skill_with_no_skill_md(self):
-        """Bullet: a skill folder without SKILL.md is not copied."""
+        """A skill folder without SKILL.md is not copied."""
         write(self.ais / "broken" / "notes.md", "no SKILL.md here\n")
         self.run_install("--yes", "claude", "ais")
         self.assertEqual(self.skills_in(self.claude), ["grill-docs", "new-ticket"])
 
     def test_skips_a_skill_with_no_name(self):
-        """Bullet: a skill whose frontmatter lacks a name is not copied."""
+        """A skill whose frontmatter lacks a name is not copied."""
         write(self.ais / "broken" / "SKILL.md", "---\ndescription: No name.\n---\n")
         self.run_install("--yes", "claude", "ais")
         self.assertEqual(self.skills_in(self.claude), ["grill-docs", "new-ticket"])
 
     def test_skips_a_skill_with_no_description(self):
-        """Bullet: a skill whose frontmatter lacks a description is not copied."""
+        """A skill whose frontmatter lacks a description is not copied."""
         write(self.ais / "broken" / "SKILL.md", "---\nname: broken\n---\n")
         self.run_install("--yes", "claude", "ais")
         self.assertEqual(self.skills_in(self.claude), ["grill-docs", "new-ticket"])
 
     def test_skips_a_skill_whose_name_differs_from_its_folder(self):
-        """Bullet: a frontmatter name that isn't the folder name keeps the skill out."""
+        """A frontmatter name that isn't the folder name keeps the skill out."""
         write(self.ais / "broken" / "SKILL.md", skill_md("other-name"))
         self.run_install("--yes", "claude", "ais")
         self.assertEqual(self.skills_in(self.claude), ["grill-docs", "new-ticket"])
 
     def test_reports_an_invalid_skill(self):
-        """Bullet: the invalid skill is reported on stderr as error: <plugin>/<skill>."""
+        """The invalid skill is reported on stderr as error: <plugin>/<skill>."""
         write(self.ais / "broken" / "SKILL.md", skill_md("other-name"))
         result = self.run_install("--yes", "claude", "ais")
         self.assertIn("error: ais/broken:", result.stderr)
 
     def test_still_copies_the_valid_skills(self):
-        """Bullet: an invalid skill doesn't stop the valid ones."""
+        """An invalid skill doesn't stop the valid ones."""
         write(self.ais / "broken" / "SKILL.md", skill_md("other-name"))
         self.run_install("--yes", "claude", "ais")
         self.assertEqual(self.skills_in(self.claude), ["grill-docs", "new-ticket"])
 
     def test_exits_1_after_an_invalid_skill(self):
-        """Bullet: an invalid skill fails the run, after copying the valid ones."""
+        """An invalid skill fails the run, after copying the valid ones."""
         write(self.ais / "broken" / "SKILL.md", skill_md("other-name"))
         result = self.run_install("--yes", "claude", "ais")
         self.assertEqual((result.returncode, (self.claude / "new-ticket").is_dir()), (1, True))
 
     def test_keeps_an_earlier_copy_of_a_skill_now_invalid(self):
-        """Behaviour 5: a skill still in the clone isn't pruned just because it is now invalid."""
+        """A skill still in the clone isn't pruned just because it is now invalid."""
         self.install("claude", "ais")
         write(self.ais / "grill-docs" / "SKILL.md", "---\nname: grill-docs\n---\n")
         self.run_install("--yes", "claude", "ais")
@@ -432,25 +419,25 @@ class TestInstallInvalidSkills(InstallCase):
 class TestInstallPlan(InstallCase):
 
     def test_plan_marks_a_new_skill_with_plus(self):
-        """Behaviour 6: a skill with no folder yet is planned as "  + <skill>"."""
+        """A skill with no folder yet is planned as "  + <skill>"."""
         result = self.install("claude", "ais")
         self.assertIn("  + grill-docs\n", result.stdout)
 
     def test_plan_marks_an_earlier_copy_with_tilde(self):
-        """Behaviour 6: a copy that will be replaced is planned as "  ~ <skill>"."""
+        """A copy that will be replaced is planned as "  ~ <skill>"."""
         self.install("claude", "ais")
         result = self.install("claude", "ais")
         self.assertIn("  ~ grill-docs\n", result.stdout)
 
     def test_plan_marks_a_dead_copy_with_minus(self):
-        """Behaviour 6: a copy that will be removed is planned as "  - <skill>"."""
+        """A copy that will be removed is planned as "  - <skill>"."""
         self.install("claude", "ais")
         shutil.rmtree(self.ais / "grill-docs")
         result = self.install("claude", "ais")
         self.assertIn("  - grill-docs\n", result.stdout)
 
     def test_plan_lists_adds_then_updates_then_removals(self):
-        """Behaviour 6: the plan groups adds, then updates, then removals."""
+        """The plan groups adds, then updates, then removals."""
         self.install("claude", "ais")
         shutil.rmtree(self.ais / "grill-docs")
         write(self.ais / "a-new-skill" / "SKILL.md", skill_md("a-new-skill"))
@@ -458,12 +445,12 @@ class TestInstallPlan(InstallCase):
         self.assertEqual(lines, ["  + a-new-skill", "  ~ new-ticket", "  - grill-docs"])
 
     def test_plan_sorts_each_group_by_name(self):
-        """Behaviour 6: skills within one group come in name order."""
+        """Skills within one group come in name order."""
         lines = [l for l in self.install("claude", "ais-max").stdout.splitlines() if l.startswith("  + ")]
         self.assertEqual(lines, ["  + architect-ticket", "  + grill-docs", "  + helper-skill", "  + new-ticket"])
 
     def test_empty_plan_says_nothing_to_change(self):
-        """Behaviour 6: with nothing to add, update or remove it says so."""
+        """With nothing to add, update or remove it says so."""
         self.claude.mkdir(parents=True)
         shutil.rmtree(self.ais)
         self.ais.mkdir()
@@ -471,18 +458,18 @@ class TestInstallPlan(InstallCase):
         self.assertEqual((result.returncode, "Nothing to change" in result.stdout), (0, True))
 
     def test_prints_added_with_the_full_path(self):
-        """Behaviour 7: each new folder is reported as "added <path>"."""
+        """Each new folder is reported as "added <path>"."""
         result = self.install("claude", "ais")
         self.assertIn(f"added {self.claude / 'grill-docs'}\n", result.stdout)
 
     def test_prints_updated_with_the_full_path(self):
-        """Behaviour 7: each replaced folder is reported as "updated <path>"."""
+        """Each replaced folder is reported as "updated <path>"."""
         self.install("claude", "ais")
         result = self.install("claude", "ais")
         self.assertIn(f"updated {self.claude / 'grill-docs'}\n", result.stdout)
 
     def test_prints_removed_with_the_full_path(self):
-        """Behaviour 7: each removed folder is reported as "removed <path>"."""
+        """Each removed folder is reported as "removed <path>"."""
         self.install("claude", "ais")
         shutil.rmtree(self.ais / "grill-docs")
         result = self.install("claude", "ais")
@@ -492,32 +479,32 @@ class TestInstallPlan(InstallCase):
 class TestInstallWithoutTerminal(InstallCase):
 
     def test_without_yes_prints_the_plan(self):
-        """Bullet: without a terminal or --yes it still prints the plan."""
+        """Without a terminal or --yes it still prints the plan."""
         result = self.run_install("claude", "ais")
         self.assertIn("  + new-ticket\n", result.stdout)
 
     def test_without_yes_writes_nothing(self):
-        """Bullet: without a terminal or --yes it writes nothing, after printing the plan."""
+        """Without a terminal or --yes it writes nothing, after printing the plan."""
         result = self.run_install("claude", "ais")
         self.assertEqual(("  + new-ticket" in result.stdout, self.claude.exists()), (True, False))
 
     def test_without_yes_exits_1(self):
-        """Bullet: without a terminal or --yes it exits 1, after printing the plan."""
+        """Without a terminal or --yes it exits 1, after printing the plan."""
         result = self.run_install("claude", "ais")
         self.assertEqual(("  + new-ticket" in result.stdout, result.returncode), (True, 1))
 
     def test_missing_both_arguments_prints_usage(self):
-        """Bullet: without a terminal and with no arguments it prints its usage on stderr."""
+        """Without a terminal and with no arguments it prints its usage on stderr."""
         result = self.run_install()
         self.assertIn("Usage: ./install.sh", result.stderr)
 
     def test_missing_the_plugin_prints_usage(self):
-        """Bullet: without a terminal and with no PLUGIN it prints its usage on stderr."""
+        """Without a terminal and with no PLUGIN it prints its usage on stderr."""
         result = self.run_install("--yes", "claude")
         self.assertIn("Usage: ./install.sh", result.stderr)
 
     def test_missing_arguments_exits_1_and_writes_nothing(self):
-        """Bullet: a usage stop writes nothing and exits 1."""
+        """A usage stop writes nothing and exits 1."""
         result = self.run_install("--yes", "claude")
         self.assertEqual(("Usage" in result.stderr, result.returncode, self.claude.exists()), (True, 1, False))
 
@@ -525,27 +512,27 @@ class TestInstallWithoutTerminal(InstallCase):
 class TestInstallArguments(InstallCase):
 
     def test_help_prints_usage_and_exits_0(self):
-        """Usage: --help prints the usage to stdout and exits 0."""
+        """--help prints the usage to stdout and exits 0."""
         result = self.run_install("--help")
         self.assertEqual((result.returncode, "Usage: ./install.sh" in result.stdout), (0, True))
 
     def test_rejects_an_unknown_agent(self):
-        """Exit status: an unknown AGENT is named in an error and exits 1."""
+        """An unknown AGENT is named in an error and exits 1."""
         result = self.run_install("--yes", "cursor", "ais")
         self.assertEqual((result.returncode, "error:" in result.stderr and "cursor" in result.stderr), (1, True))
 
     def test_rejects_an_unknown_plugin(self):
-        """Exit status: an unknown PLUGIN is named in an error and exits 1."""
+        """An unknown PLUGIN is named in an error and exits 1."""
         result = self.run_install("--yes", "claude", "max")
         self.assertEqual((result.returncode, "error:" in result.stderr and "max" in result.stderr), (1, True))
 
     def test_rejects_an_unknown_flag(self):
-        """Exit status: an unknown flag is named in an error and exits 1."""
+        """An unknown flag is named in an error and exits 1."""
         result = self.run_install("--yes", "--force", "claude", "ais")
         self.assertEqual((result.returncode, "error:" in result.stderr and "--force" in result.stderr), (1, True))
 
     def test_an_unknown_argument_writes_nothing(self):
-        """Exit status: an unknown argument stops the run before any write."""
+        """An unknown argument stops the run before any write."""
         result = self.run_install("--yes", "claude", "max")
         self.assertEqual(("error:" in result.stderr, self.home.exists() and self.skills_in(self.home)), (True, []))
 
@@ -553,47 +540,47 @@ class TestInstallArguments(InstallCase):
 class TestInstallOnTerminal(InstallCase):
 
     def test_asks_for_the_agent_then_the_plugin(self):
-        """Behaviour 2: with no arguments on a terminal it asks for both, then copies."""
+        """With no arguments on a terminal it asks for both, then copies."""
         code, out = self.run_tty(answers="claude\nais\ny\n")
         self.assertEqual((code, self.skills_in(self.claude)), (0, ["grill-docs", "new-ticket"]), out)
 
     def test_accepts_numbers_from_the_lists(self):
-        """Behaviour 2: each prompt takes the number of a listed choice."""
+        """Each prompt takes the number of a listed choice."""
         code, out = self.run_tty(answers="3\n1\ny\n")
         self.assertEqual((code, self.skills_in(self.codex)), (0, ["grill-docs", "new-ticket"]), out)
 
     def test_asks_again_after_an_unknown_answer(self):
-        """Behaviour 2: an answer that names no agent gets the question again."""
+        """An answer that names no agent gets the question again."""
         code, out = self.run_tty(answers="cursor\nagy\nais\ny\n")
         self.assertEqual((code, self.skills_in(self.agy)), (0, ["grill-docs", "new-ticket"]), out)
 
     def test_asks_only_for_the_missing_plugin(self):
-        """Behaviour 2: given the agent, it asks only for the plugin."""
+        """Given the agent, it asks only for the plugin."""
         code, out = self.run_tty("claude", answers="ais-max\ny\n")
         self.assertEqual((code, len(self.skills_in(self.claude))), (0, 4), out)
 
     def test_asks_to_apply(self):
-        """Behaviour 6: on a terminal it asks "Apply? [y/N] " before writing."""
+        """On a terminal it asks "Apply? [y/N] " before writing."""
         code, out = self.run_tty("claude", "ais", answers="n\n")
         self.assertIn("Apply? [y/N]", out)
 
     def test_declining_writes_nothing(self):
-        """Bullet: answering no leaves the agent folder as it was."""
+        """Answering no leaves the agent folder as it was."""
         code, out = self.run_tty("claude", "ais", answers="n\n")
         self.assertEqual(("Nothing written" in out, self.claude.exists()), (True, False), out)
 
     def test_declining_exits_0(self):
-        """Exit status: a declined plan is not a failure."""
+        """A declined plan is not a failure."""
         code, out = self.run_tty("claude", "ais", answers="n\n")
         self.assertEqual((code, "Nothing written" in out), (0, True), out)
 
     def test_an_empty_answer_declines(self):
-        """Behaviour 6: Enter alone takes the N default."""
+        """Enter alone takes the N default."""
         code, out = self.run_tty("claude", "ais", answers="\n")
         self.assertEqual(("Nothing written" in out, self.claude.exists()), (True, False), out)
 
     def test_yes_skips_the_question(self):
-        """Usage: --yes applies on a terminal without asking."""
+        """--yes applies on a terminal without asking."""
         code, out = self.run_tty("--yes", "claude", "ais")
         self.assertEqual((code, "Apply?" in out, self.skills_in(self.claude)),
                          (0, False, ["grill-docs", "new-ticket"]), out)
@@ -602,235 +589,49 @@ class TestInstallOnTerminal(InstallCase):
 class TestInstallCodex(InstallCase):
 
     def test_copies_every_skill_into_the_codex_folder(self):
-        """Behaviour 8: the codex agent's skills folder is ~/.agents/skills."""
+        """The codex agent's skills folder is ~/.agents/skills."""
         self.install("codex", "ais-max")
         self.assertEqual(self.skills_in(self.codex),
                          ["architect-ticket", "grill-docs", "helper-skill", "new-ticket"])
 
     def test_copies_converted_mentions(self):
-        """Behaviour 8: Codex copies carry bare $<skill> mentions from the local build."""
+        """Codex copies carry bare $<skill> mentions from the local build."""
         self.install("codex", "ais-max")
         self.assertIn("Point at $new-ticket.", (self.codex / "architect-ticket" / "SKILL.md").read_text())
 
     def test_copies_converted_frontmatter(self):
-        """Behaviour 8: Codex copies keep only name and description in the frontmatter."""
+        """Codex copies keep only name and description in the frontmatter."""
         self.install("codex", "ais-max")
         self.assertNotIn("model: opus", (self.codex / "architect-ticket" / "SKILL.md").read_text())
 
     def test_copies_the_invocation_policy(self):
-        """Behaviour 8: a skill that disables model invocation gets agents/openai.yaml."""
+        """A skill that disables model invocation gets agents/openai.yaml."""
         self.install("codex", "ais")
         self.assertEqual((self.codex / "new-ticket" / "agents" / "openai.yaml").read_bytes(), POLICY)
 
     def test_claude_copies_stay_unconverted(self):
-        """Behaviour 3: only Codex copies are converted; Claude gets the source as written."""
+        """Only Codex copies are converted; Claude gets the source as written."""
         self.install("claude", "ais-max")
         self.assertIn("Point at /new-ticket.", (self.claude / "architect-ticket" / "SKILL.md").read_text())
 
     def test_a_failed_build_writes_nothing(self):
-        """Step 3: when the local build fails, nothing reaches the Codex folder."""
+        """When the local build fails, nothing reaches the Codex folder."""
         self.install("claude", "ais")
         self.path = self.failing_python_path()
         result = self.run_install("--yes", "codex", "ais")
         self.assertEqual((result.returncode, self.codex.exists()), (1, False))
 
     def test_missing_python3_writes_nothing(self):
-        """Step 3: without python3 it says why on stderr and writes nothing."""
+        """Without python3 it says why on stderr and writes nothing."""
         self.path = self.no_python_path()
         result = self.run_install("--yes", "codex", "ais")
         self.assertEqual((result.returncode, self.codex.exists(), "python3" in result.stderr), (1, False, True))
 
     def test_claude_needs_no_python3(self):
-        """Step 3: only codex runs the build, so claude installs without python3."""
+        """Only codex runs the build, so claude installs without python3."""
         self.path = self.no_python_path()
         result = self.run_install("--yes", "claude", "ais")
         self.assertEqual((result.returncode, self.skills_in(self.claude)), (0, ["grill-docs", "new-ticket"]))
-
-
-# ---------------------------------------------------------------- build_local
-
-
-class LocalCase(unittest.TestCase):
-
-    def setUp(self):
-        self.work = Path(tempfile.mkdtemp())
-        self.ais, self.ais_max = build_sources(self.work)
-        self.dest = self.work / "out" / "local"
-        self.scratch = self.work / "scratch"
-        self.scratch.mkdir()
-        self._old_tempdir = tempfile.tempdir
-        tempfile.tempdir = str(self.scratch)
-
-    def tearDown(self):
-        tempfile.tempdir = self._old_tempdir
-        shutil.rmtree(self.work)
-
-    def run_local(self):
-        return build_codex.build_local(ais=self.ais, ais_max=self.ais_max, dest=self.dest)
-
-    def built(self, *parts):
-        return self.dest.joinpath(*parts)
-
-
-class TestBuildLocalWrites(LocalCase):
-
-    def test_returns_every_skill_name_sorted(self):
-        """Interface 4: build_local returns every skill from both plugins, sorted."""
-        self.assertEqual(self.run_local(), ["architect-ticket", "grill-docs", "helper-skill", "new-ticket"])
-
-    def test_writes_skills_flat(self):
-        """Interface 4: skills from both plugins sit directly inside dest, and nothing else does."""
-        self.run_local()
-        self.assertEqual(sorted(p.name for p in self.dest.iterdir()),
-                         ["architect-ticket", "grill-docs", "helper-skill", "new-ticket"])
-
-    def test_mentions_have_no_plugin_prefix(self):
-        """Interface 4: a /<skill> mention becomes $<skill>."""
-        self.run_local()
-        self.assertIn("Point at $new-ticket.", self.built("architect-ticket", "SKILL.md").read_text())
-
-    def test_mentions_in_other_markdown_files_have_no_prefix(self):
-        """Interface 4: mentions in every .md file are rewritten, not only SKILL.md."""
-        self.run_local()
-        self.assertEqual(self.built("grill-docs", "FORMAT.md").read_text(), "Then hand back to $new-ticket.\n")
-
-    def test_leaves_unknown_mentions(self):
-        """Interface 4: a /<word> that names no skill stays as written."""
-        self.run_local()
-        self.assertIn("Leave /not-a-skill alone.", self.built("architect-ticket", "SKILL.md").read_text())
-
-    def test_frontmatter_keeps_only_name_and_description(self):
-        """Interface 4: SKILL.md frontmatter keeps only name and description."""
-        self.run_local()
-        text = self.built("architect-ticket", "SKILL.md").read_text()
-        self.assertTrue(text.startswith(
-            "---\nname: architect-ticket\ndescription: The architect-ticket skill.\n---\n"), text)
-
-    def test_blocks_implicit_invocation_where_disabled(self):
-        """Interface 4: disable-model-invocation: true gives agents/openai.yaml."""
-        self.run_local()
-        self.assertEqual(self.built("new-ticket", "agents", "openai.yaml").read_bytes(), POLICY)
-
-    def test_no_policy_file_where_invocation_is_allowed(self):
-        """Interface 4: a skill without the flag gets no agents/openai.yaml."""
-        self.run_local()
-        self.assertFalse(self.built("grill-docs", "agents").exists())
-
-    def test_copies_binary_files_byte_for_byte(self):
-        """Interface 4: non-markdown files are copied unchanged."""
-        self.run_local()
-        self.assertEqual(self.built("grill-docs", "LICENSE").read_bytes(), b"\x00\x01binary licence\xff")
-
-    def test_skips_hidden_files_and_folders(self):
-        """Interface 4: nothing on a hidden path reaches dest."""
-        self.run_local()
-        self.assertEqual([p for p in self.dest.rglob(".*")], [])
-
-    def test_writes_no_manifests(self):
-        """Interface 4: dest holds no marketplace or plugin manifest."""
-        self.run_local()
-        self.assertEqual(list(self.dest.rglob("*.json")), [])
-
-    def test_replaces_an_earlier_dest(self):
-        """Interface 4: a folder already at dest is replaced."""
-        write(self.dest / "stale" / "file.md", "from an older build\n")
-        self.run_local()
-        self.assertFalse(self.built("stale").exists())
-
-    def test_rerun_is_byte_identical(self):
-        """Interface 4: two runs on the same inputs leave dest identical."""
-        self.run_local()
-        first = snapshot(self.dest)
-        self.run_local()
-        self.assertEqual(snapshot(self.dest), first)
-
-    def test_writes_nothing_outside_dest(self):
-        """Interface 4: only dest changes, apart from deleted temp files."""
-        before = {k: v for k, v in snapshot(self.work).items() if not k.startswith(("out", "scratch"))}
-        self.run_local()
-        after = {k: v for k, v in snapshot(self.work).items() if not k.startswith(("out", "scratch"))}
-        self.assertEqual((after, list(self.scratch.iterdir())), (before, []))
-
-
-class TestBuildLocalRefuses(LocalCase):
-
-    def assert_refused(self):
-        write(self.dest / "keep.md", "untouched\n")
-        before = snapshot(self.dest)
-        with self.assertRaises(build_codex.BuildError):
-            self.run_local()
-        self.assertEqual(snapshot(self.dest), before)
-
-    def test_refuses_a_missing_ais_folder(self):
-        """Interface 4: a missing ais folder raises BuildError and leaves dest alone."""
-        shutil.rmtree(self.ais)
-        self.assert_refused()
-
-    def test_refuses_a_missing_ais_max_folder(self):
-        """Interface 4: a missing ais-max folder raises BuildError and leaves dest alone."""
-        shutil.rmtree(self.ais_max)
-        self.assert_refused()
-
-    def test_refuses_a_skill_in_both_plugins(self):
-        """Interface 4: a skill in both plugins raises BuildError and leaves dest alone."""
-        write(self.ais_max / "grill-docs" / "SKILL.md", skill_md("grill-docs"))
-        self.assert_refused()
-
-    def test_refuses_a_reference_into_the_other_plugin(self):
-        """Interface 4: a ../ reference across plugins is refused even though dest is flat."""
-        write(self.ais_max / "helper-skill" / "x.md", "See ../grill-docs/FORMAT.md.\n")
-        self.assert_refused()
-
-    def test_refuses_a_reference_to_a_missing_file(self):
-        """Interface 4: a ../ reference to a missing file raises BuildError."""
-        write(self.ais_max / "helper-skill" / "x.md", "See ../architect-ticket/nope.md.\n")
-        self.assert_refused()
-
-
-class TestLocalCommand(unittest.TestCase):
-    """main(["local"]) builds into the real ROOT / .codex-local."""
-
-    def setUp(self):
-        self.local = ROOT / ".codex-local"
-        self.had_local = self.local.exists()
-        self.release = ROOT / ".codex-build"
-
-    def tearDown(self):
-        if not self.had_local and self.local.exists():
-            shutil.rmtree(self.local)
-
-    def run_main(self, argv):
-        out, err = io.StringIO(), io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            code = build_codex.main(argv)
-        return code, out.getvalue(), err.getvalue()
-
-    def test_local_reports_what_it_wrote(self):
-        """Interface 4: `local` exits 0 and prints the skill count and folder."""
-        count = len(build_codex.skill_owners())
-        self.assertEqual(self.run_main(["local"])[:2], (0, f"Wrote {count} skills to .codex-local\n"))
-
-    def test_local_writes_into_codex_local(self):
-        """Interface 4: `local` writes every skill into ROOT/.codex-local."""
-        self.run_main(["local"])
-        self.assertEqual(sorted(p.name for p in self.local.iterdir()), sorted(build_codex.skill_owners()))
-
-    def test_local_leaves_the_release_tree_alone(self):
-        """Interface 4: a local build never touches .codex-build."""
-        before = snapshot(self.release)
-        code = self.run_main(["local"])[0]
-        self.assertEqual((code, snapshot(self.release)), (0, before))
-
-    def test_local_takes_no_arguments(self):
-        """Interface 4: `local` with an argument is a usage error naming the extra argument."""
-        code, _, err = self.run_main(["local", "1.0.0"])
-        self.assertEqual((code, "unrecognized arguments: 1.0.0" in err), (2, True))
-
-    def test_local_folder_is_git_ignored(self):
-        """Interface 4: git ignores .codex-local, so a local build never shows in a diff."""
-        result = subprocess.run(["git", "check-ignore", "-q", ".codex-local/x/SKILL.md"],
-                                cwd=ROOT, capture_output=True)
-        self.assertEqual(result.returncode, 0)
 
 
 if __name__ == "__main__":
