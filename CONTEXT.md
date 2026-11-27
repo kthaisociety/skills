@@ -28,6 +28,10 @@ _Avoid_: mirror, dist repo
 The folder a build script writes for one agent, holding **ais** and **ais-max** each as a plugin of its own, ready to publish to that agent's **Release repo**.
 _Avoid_: build output, dist
 
+**Local install**:
+A run of `install.sh` that copies one plugin's skills from a clone into one agent's skills folder, so a developer can try them before a release. Choosing **ais-max** copies **ais** too.
+_Avoid_: link, symlink install
+
 ## Relationships
 
 - **ais-max** depends on exactly one **ais**
@@ -36,6 +40,7 @@ _Avoid_: build output, dist
 - A **Release repo** holds one **Tree**, rebuilt for every release, with one version shared by its marketplace and both plugins
 - Every skill in **ais** came from one **Seed**; a **Sync** never touches **ais**
 - A **Sync** replaces the base-file copies in `ais-max`'s `helper-skill` with the **ais** versions
+- A **Local install** replaces or removes only the skill folders an earlier **Local install** wrote
 
 ## Example dialogue
 

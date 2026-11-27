@@ -105,13 +105,13 @@ def _mention_pattern(names):
     return re.compile(r"(?<![\w./-])/(" + alternatives + r")(?![\w/-]|\.\w)")
 
 
-def _rewrite_mentions(text, owners, prefixed=True):
+def _rewrite_mentions(text, owners, mention):
+    """Return text with each "/<skill>" mention of a skill in owners replaced
+    by mention(skill)."""
     if not owners:
         return text
     pattern = _mention_pattern(owners)
-    if prefixed:
-        return pattern.sub(lambda m: f"${owners[m.group(1)]}:{m.group(1)}", text)
-    return pattern.sub(lambda m: f"${m.group(1)}", text)
+    return pattern.sub(lambda m: mention(m.group(1)), text)
 
 
 def _check_references(text, plugin, label, owners, sources):
@@ -156,11 +156,11 @@ def _strip_frontmatter(text):
     return "---\n" + "".join(line + "\n" for line in kept) + "---\n" + "\n".join(body), disable
 
 
-def _convert_skill(plugin, skill, owners, sources, files, prefix=None, prefixed=True):
-    """Add one skill's converted files to files, keyed by their path in the tree."""
+def _convert_skill(plugin, skill, owners, sources, files, prefix, mention):
+    """Add one skill's converted files to files, keyed by their path in the tree:
+    prefix, then the file's path inside the skill. Each skill mention becomes
+    mention(skill), per _rewrite_mentions."""
     skill_src = sources[plugin] / skill
-    if prefix is None:
-        prefix = f"{plugin}/skills/{skill}"
     for path in _visible_files(skill_src):
         rel = path.relative_to(skill_src)
         out = f"{prefix}/{rel.as_posix()}"
@@ -169,7 +169,7 @@ def _convert_skill(plugin, skill, owners, sources, files, prefix=None, prefixed=
             files[out] = path.read_bytes()
             continue
         _check_references(text, plugin, out, owners, sources)
-        text = _rewrite_mentions(text, owners, prefixed)
+        text = _rewrite_mentions(text, owners, mention)
         if rel == Path("SKILL.md"):
             text, disable = _strip_frontmatter(text)
             if disable:
@@ -277,7 +277,8 @@ def build_tree(version, ais=ROOT / "ais", ais_max=ROOT / "ais-max", dest=ROOT / 
     for plugin in PLUGINS:
         written[plugin] = sorted(name for name, owner in owners.items() if owner == plugin)
         for skill in written[plugin]:
-            _convert_skill(plugin, skill, owners, sources, files)
+            _convert_skill(plugin, skill, owners, sources, files, f"{plugin}/skills/{skill}",
+                           lambda name: f"${owners[name]}:{name}")
     files[MARKETPLACE_FILE] = _json_bytes(_marketplace())
     for name in PLUGINS:
         files[f"{name}/.codex-plugin/plugin.json"] = _json_bytes(_manifest(name, version))
@@ -320,7 +321,7 @@ def build_local(ais=ROOT / "ais", ais_max=ROOT / "ais-max", dest=ROOT / LOCAL_BU
     owners = skill_owners(ais, ais_max)
     files = {}
     for skill, plugin in owners.items():
-        _convert_skill(plugin, skill, owners, sources, files, prefix=skill, prefixed=False)
+        _convert_skill(plugin, skill, owners, sources, files, skill, lambda name: f"${name}")
     _write_tree(files, Path(dest))
     return sorted(owners)
 

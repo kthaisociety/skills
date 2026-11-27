@@ -168,15 +168,18 @@ check_skill() {
   return 0
 }
 
-# Every skill folder name in this clone, from either plugin.
+# skill_names <plugin>: prints the name of every skill folder in <plugin>/,
+# one per line. Hidden folders are not skills.
+skill_names() {
+  local d
+  for d in "$ROOT/$1"/*/; do
+    if [ -d "$d" ]; then basename "$d"; fi
+  done
+}
+
 clone_skills=""
 for p in ais ais-max; do
-  if [ -d "$ROOT/$p" ]; then
-    for d in "$ROOT/$p"/*/; do
-      [ -d "$d" ] || continue
-      clone_skills="$clone_skills$(basename "$d")"$'\n'
-    done
-  fi
+  if [ -d "$ROOT/$p" ]; then clone_skills="$clone_skills$(skill_names "$p")"$'\n'; fi
 done
 
 plugins="ais"
@@ -186,16 +189,15 @@ plugins="ais"
 valid=""
 for p in $plugins; do
   [ -d "$ROOT/$p" ] || { echo "error: $ROOT/$p is not a folder" >&2; exit 1; }
-  for d in "$ROOT/$p"/*/; do
-    [ -d "$d" ] || continue
-    s="$(basename "$d")"
+  while IFS= read -r s; do
+    [ -n "$s" ] || continue
     if problem="$(check_skill "$p" "$s")"; then
       valid="$valid$s $p"$'\n'
     else
       echo "error: $p/$s: $problem" >&2
       rc=1
     fi
-  done
+  done < <(skill_names "$p")
 done
 valid="$(printf '%s' "$valid" | LC_ALL=C sort)"
 
@@ -245,24 +247,22 @@ if [ -d "$target" ]; then
 fi
 removals="$(printf '%s' "$removals" | LC_ALL=C sort)"
 
-plan_empty=1
-while read -r s p; do
-  if [ -n "$s" ]; then echo "  + $s"; plan_empty=0; fi
-done <<EOF
-$adds
+# print_group <mark> <lines>: prints "  <mark> <skill>" for each
+# "<skill> [plugin]" line.
+print_group() {
+  local s p
+  while read -r s p; do
+    if [ -n "$s" ]; then echo "  $1 $s"; fi
+  done <<EOF
+$2
 EOF
-while read -r s p; do
-  if [ -n "$s" ]; then echo "  ~ $s"; plan_empty=0; fi
-done <<EOF
-$updates
-EOF
-while read -r s; do
-  if [ -n "$s" ]; then echo "  - $s"; plan_empty=0; fi
-done <<EOF
-$removals
-EOF
+}
 
-if [ "$plan_empty" -eq 1 ]; then
+print_group + "$adds"
+print_group "~" "$updates"
+print_group - "$removals"
+
+if [ -z "$adds$updates$removals" ]; then
   echo "Nothing to change"
   exit "$rc"
 fi

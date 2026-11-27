@@ -132,6 +132,12 @@ python3 scripts/build-claude.py build 1.0.0
 python3 scripts/build-claude.py check
 ```
 
+Copy the skills from your clone into one agent's skills folder to try them before a release. `AGENT` is `claude`, `agy` or `codex`, and `PLUGIN` is `ais` or `ais-max`, which copies `ais` too. Rerun it after each edit, since it copies rather than links. It shows the plan and asks before writing; `--yes` skips the question:
+
+```bash
+./install.sh AGENT PLUGIN
+```
+
 A weekly GitHub Action runs `skill:sync` and opens a PR when upstream skills change.
 
 ## License
