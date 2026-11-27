@@ -311,12 +311,25 @@ def _version_problem(rel, version, reference):
     return None
 
 
+def _source_problem(tree, name, source):
+    """Return the problem with a marketplace entry's source, or None when it names a folder in tree."""
+    if not isinstance(source, str) or not source:
+        return f"{_MARKETPLACE_JSON}: entry {name} has no source"
+    folder = (tree / source).resolve()
+    if not folder.is_relative_to(tree.resolve()):
+        return f"{_MARKETPLACE_JSON}: entry {name} has source {source}, which is outside the tree"
+    if not folder.is_dir():
+        return f"{Path(source).as_posix().removeprefix('./')}: listed in the marketplace as {name}, but the folder is missing"
+    return None
+
+
 def _listed_plugin_problems(tree, listed, reference):
     """Return the problems with each marketplace entry's plugin folder and version."""
     problems = []
     for name, entry in listed.items():
-        if not (tree / name).is_dir():
-            problems.append(f"{name}: listed in the marketplace, but its plugin folder is missing")
+        found = _source_problem(tree, name, entry.get("source"))
+        if found:
+            problems.append(found)
         found = _version_problem(f"{_MARKETPLACE_JSON} entry {name}", entry.get("version"), reference)
         if found:
             problems.append(found)

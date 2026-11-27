@@ -493,6 +493,22 @@ class TestCheckManifests(CheckCase):
         shutil.rmtree(self.tree / "ais-max")
         self.assert_reports("ais-max")
 
+    def test_source_naming_a_missing_folder_fails(self):
+        """An entry whose source names a missing folder fails even when the plugin's own folder exists."""
+        edit_json(self.marketplace(), lambda d: d["plugins"][0].update(source="./gone"))
+        self.assert_reports("gone")
+
+    def test_missing_source_fails(self):
+        """An entry with no source gives a message naming the marketplace file and the plugin."""
+        edit_json(self.marketplace(), lambda d: d["plugins"][1].pop("source"))
+        self.assert_reports(".claude-plugin/marketplace.json", "ais-max")
+
+    def test_source_outside_the_tree_fails(self):
+        """An entry whose source leaves the tree fails even when that folder exists."""
+        (self.work / "outside").mkdir()
+        edit_json(self.marketplace(), lambda d: d["plugins"][0].update(source="../outside"))
+        self.assert_reports(".claude-plugin/marketplace.json", "ais")
+
     def test_entry_version_disagrees_with_plugin_json_fails(self):
         """A marketplace entry version unlike its plugin.json version gives a message."""
         edit_json(self.plugin_json("ais-max"), lambda d: d.update(version="1.4.1"))
