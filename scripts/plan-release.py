@@ -17,6 +17,7 @@ RECORD = Path("ais-max") / ".source.json"
 _RELEASE_TAG = re.compile(r"v([0-9]+)\.([0-9]+)\.([0-9]+)")
 _BREAKING = re.compile(r"[a-z]+(\([^()]*\))?!:")
 _FEAT = re.compile(r"feat(\([^()]*\))?:")
+_FIRST_VERSION = "1.0.0"
 
 Plan = namedtuple("Plan", ["version", "last_tag", "source_tag"])
 Plan.__doc__ = """What a release would be, read from the repo without changing it.
@@ -66,6 +67,15 @@ def plan(repo=ROOT, record=None):
     so the caller must have every tag and the full history checked out.
     """
     repo = Path(repo)
+    _require_commit(repo)
+    last_tag = _last_release_tag(repo)
+    version = _FIRST_VERSION if last_tag is None else _next_version(repo, last_tag)
+    path = (repo / RECORD) if record is None else Path(record)
+    return Plan(version, last_tag, _source_tag(path))
+
+
+def _require_commit(repo):
+    """Raise PlanError unless repo is a git work tree whose HEAD has a commit."""
     if _git(repo, "rev-parse", "--is-inside-work-tree").strip() != "true":
         raise PlanError(f"{repo} is not a git work tree")
     try:
@@ -73,31 +83,40 @@ def plan(repo=ROOT, record=None):
     except PlanError as error:
         raise PlanError(f"{repo} has no commit to plan from: {error}") from error
 
-    last = None
-    for name in _git(repo, "tag", "--merged", "HEAD").splitlines():
-        match = _RELEASE_TAG.fullmatch(name)
-        if match:
-            key = tuple(int(part) for part in match.groups())
-            if last is None or key > last[0]:
-                last = (key, name)
 
-    if last is None:
-        version, last_tag = "1.0.0", None
+def _last_release_tag(repo):
+    """The highest vX.Y.Z tag reachable from HEAD in repo, or None when there is none."""
+    releases = [name for name in _git(repo, "tag", "--merged", "HEAD").splitlines()
+                if _RELEASE_TAG.fullmatch(name)]
+    return max(releases, key=_release_key, default=None)
+
+
+def _release_key(tag):
+    """The (X, Y, Z) integers of a vX.Y.Z release tag."""
+    return tuple(int(part) for part in _RELEASE_TAG.fullmatch(tag).groups())
+
+
+def _next_version(repo, last_tag):
+    """last_tag bumped by the titles of the commits after it, as "X.Y.Z".
+
+    Raises PlanError when no commit follows last_tag.
+    """
+    span = f"{last_tag}..HEAD"
+    if not _git(repo, "rev-list", span).strip():
+        raise PlanError(f"nothing to release since {last_tag}")
+    titles = _git(repo, "log", "--format=%s", span).splitlines()
+    major, minor, patch = _release_key(last_tag)
+    if any(_BREAKING.match(title) for title in titles):
+        major, minor, patch = major + 1, 0, 0
+    elif any(_FEAT.match(title) for title in titles):
+        minor, patch = minor + 1, 0
     else:
-        (major, minor, patch), last_tag = last
-        span = f"{last_tag}..HEAD"
-        if not _git(repo, "rev-list", span).strip():
-            raise PlanError(f"nothing to release since {last_tag}")
-        titles = _git(repo, "log", "--format=%s", span).splitlines()
-        if any(_BREAKING.match(title) for title in titles):
-            major, minor, patch = major + 1, 0, 0
-        elif any(_FEAT.match(title) for title in titles):
-            minor, patch = minor + 1, 0
-        else:
-            patch += 1
-        version = f"{major}.{minor}.{patch}"
+        patch += 1
+    return f"{major}.{minor}.{patch}"
 
-    path = (repo / RECORD) if record is None else Path(record)
+
+def _source_tag(path):
+    """The string "tag" of the sync record at path. Raises PlanError naming path."""
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as error:
@@ -108,8 +127,7 @@ def plan(repo=ROOT, record=None):
         raise PlanError(f"sync record {path} isn't JSON: {error}") from error
     if not isinstance(data, dict) or not isinstance(data.get("tag"), str):
         raise PlanError(f"sync record {path} must be a JSON object with a string \"tag\"")
-
-    return Plan(version, last_tag, data["tag"])
+    return data["tag"]
 
 
 def _git(repo, *args):

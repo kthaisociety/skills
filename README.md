@@ -132,6 +132,14 @@ python3 scripts/build-claude.py build 1.0.0
 python3 scripts/build-claude.py check
 ```
 
+Plan the next release version from the commit titles since the last `vX.Y.Z` tag. It prints `version`, `last_tag` and `source_tag` lines:
+
+```bash
+python3 scripts/plan-release.py
+```
+
+The Release workflow, started by hand on `main` from the Actions tab, runs the tests, plans the version, then builds and checks all three trees with it. Dry run is on by default and changes nothing. Publishing isn't set up yet.
+
 A weekly GitHub Action runs `skill:sync` and opens a PR when upstream skills change.
 
 ## License
