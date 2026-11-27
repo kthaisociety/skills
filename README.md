@@ -111,6 +111,13 @@ python3 scripts/sync-ais-max.py v2.1.0
 python3 -m unittest discover -s tests
 ```
 
+Build the Codex marketplace tree into `.codex-build/`, then check it:
+
+```bash
+python3 scripts/build-codex.py build 1.0.0
+python3 scripts/build-codex.py check
+```
+
 A weekly GitHub Action runs `skill:sync` and opens a PR when upstream skills change.
 
 ## License
