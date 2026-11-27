@@ -1,4 +1,4 @@
-"""Acceptance tests for #8: scripts/build-agy.py builds and checks the ais-agy tree.
+"""Tests for scripts/build-agy.py, which builds and checks the ais-agy plugin tree.
 
 Every test runs in a temp folder against fake ais and ais-max folders and a
 fake `agy` command, except TestRealTree, which builds from this repo's own
@@ -742,13 +742,16 @@ class TestMain(Case):
 
     def test_build_never_runs_the_check(self):
         """build writes the tree without calling agy."""
-        result = self.run_main("build", VERSION)
-        self.assertEqual((result.returncode, calls_made(self.calls)), (0, []))
+        self.run_main("build", VERSION)
+        self.assertEqual(calls_made(self.calls), [])
 
     def test_bad_version_exits_one(self):
-        """build with a bad version exits 1 cleanly, without a traceback."""
-        result = self.run_main("build", "1.0")
-        self.assertEqual((result.returncode, "Traceback" in result.stderr), (1, False))
+        """build with a bad version exits 1."""
+        self.assertEqual(self.run_main("build", "1.0").returncode, 1)
+
+    def test_bad_version_prints_no_traceback(self):
+        """build with a bad version fails cleanly, without a traceback."""
+        self.assertNotIn("Traceback", self.run_main("build", "1.0").stderr)
 
     def test_bad_version_prints_one_error_line(self):
         """build with a bad version prints one "error: " line on stderr."""
@@ -758,15 +761,18 @@ class TestMain(Case):
         """build with a bad version leaves an earlier tree as it was."""
         write(self.work / ".agy-build" / "ais" / "plugin.json", b"earlier\n")
         before = snapshot(self.work / ".agy-build")
-        result = self.run_main("build", "1.0")
-        self.assertEqual(("Traceback" in result.stderr, snapshot(self.work / ".agy-build")),
-                         (False, before))
+        self.run_main("build", "1.0")
+        self.assertEqual(snapshot(self.work / ".agy-build"), before)
 
     def test_check_passes_a_built_tree(self):
-        """check on a freshly built tree exits 0 and prints "Tree passes"."""
+        """check on a freshly built tree prints "Tree passes"."""
         self.run_main("build", VERSION)
-        result = self.run_main("check")
-        self.assertEqual((result.returncode, result.stdout), (0, "Tree passes\n"))
+        self.assertEqual(self.run_main("check").stdout, "Tree passes\n")
+
+    def test_check_of_a_built_tree_exits_zero(self):
+        """check on a freshly built tree exits 0."""
+        self.run_main("build", VERSION)
+        self.assertEqual(self.run_main("check").returncode, 0)
 
     def test_check_reads_the_build_folder_by_default(self):
         """check with no TREE runs agy on the plugins under .agy-build."""
@@ -779,16 +785,14 @@ class TestMain(Case):
         """check TREE checks that tree instead of the build folder."""
         tree = self.work / "elsewhere"
         write_tree(tree)
-        result = self.run_main("check", str(tree))
-        self.assertEqual((result.returncode, result.stdout), (0, "Tree passes\n"))
+        self.assertEqual(self.run_main("check", str(tree)).stdout, "Tree passes\n")
 
     def test_check_failure_exits_one(self):
         """check on a tree that breaks a rule exits 1."""
         tree = self.work / "elsewhere"
         write_tree(tree)
         (tree / "ais" / "plugin.json").unlink()
-        result = self.run_main("check", str(tree))
-        self.assertEqual((result.returncode, "Traceback" in result.stderr), (1, False))
+        self.assertEqual(self.run_main("check", str(tree)).returncode, 1)
 
     def test_check_failure_prints_each_message_on_stderr(self):
         """check prints each message on its own line to stderr."""
@@ -800,9 +804,12 @@ class TestMain(Case):
         self.assertEqual(starts(lines, ["ais/plugin.json", "ais-max/skills/unslop"]), True, lines)
 
     def test_check_of_a_missing_tree_exits_one(self):
-        """check with no build folder exits 1 without a traceback."""
-        result = self.run_main("check")
-        self.assertEqual((result.returncode, "Traceback" in result.stderr), (1, False))
+        """check with no build folder exits 1."""
+        self.assertEqual(self.run_main("check").returncode, 1)
+
+    def test_check_of_a_missing_tree_prints_no_traceback(self):
+        """check with no build folder fails cleanly, without a traceback."""
+        self.assertNotIn("Traceback", self.run_main("check").stderr)
 
     def test_no_arguments_exits_two(self):
         """No subcommand exits 2."""
