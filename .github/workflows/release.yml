@@ -1,0 +1,52 @@
+# Plan, build and check a release of ais and ais-max for every agent.
+#
+# Started by hand from the Actions tab. Input:
+#   dry_run   boolean, default true. On, the run stops green after the
+#             summary and changes nothing. Off, it stops red after the
+#             summary, saying publishing isn't set up yet.
+#
+# Guarantees, in order:
+#   1. Started on any ref but refs/heads/main, the run fails before
+#      anything else, saying releases run only from main.
+#   2. It runs `python3 -m unittest discover -s tests`. A failure fails the run.
+#   3. It runs scripts/plan-release.py. When the planner exits non-zero,
+#      the run fails with the planner's message, such as
+#      "nothing to release since v1.2.0".
+#   4. It builds and checks the Claude, Codex and Antigravity trees with the
+#      planned version, installing Claude Code and agy first (ADR-0006,
+#      ADR-0009). Any build or check failure fails the run.
+#   5. It prints the version, the Custom-skills tag from the ais-max sync
+#      record, and each tree's skill count per plugin, from the build output.
+#   6. Then the dry_run stop above.
+#
+# Side effects: none outside the runner. No file is committed, no tag is
+# pushed, and every job holds only `contents: read`.
+#
+# A run started while another release run is going waits for it to finish
+# (the `release` concurrency group, never cancelling the one in progress).
+
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Plan, build and check only. Change nothing."
+        type: boolean
+        default: true
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Not implemented
+        run: |
+          echo "error: the release workflow is not implemented yet" >&2
+          exit 1
