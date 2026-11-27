@@ -4,7 +4,14 @@
 Usage: python3 scripts/sync-ais-max.py v2.1.0
 """
 
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -15,10 +22,29 @@ BASE_FILES = {
     "RECORD-FORMAT.md": "grill-docs",
     "ticket-pr.md": "pr-ticket",
 }
+TAG_FORM = re.compile(r"v[0-9]+\.[0-9]+\.[0-9]+")
+MARKETPLACE = ".claude-plugin/marketplace.json"
 
 
 class SyncError(Exception):
     """A check failed before anything was written. The message says which one."""
+
+
+def _clone(repo, tag, into):
+    """Clone repo at tag into the folder into. Returns the commit the tag points at."""
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+    try:
+        subprocess.run(["git", "clone", "--quiet", "--depth", "1", "--branch", tag, repo, str(into)],
+                       check=True, capture_output=True, text=True, env=env)
+        head = subprocess.run(["git", "-C", str(into), "rev-parse", "HEAD"],
+                              check=True, capture_output=True, text=True, env=env)
+    except subprocess.CalledProcessError as error:
+        lines = (error.stderr or "").strip().splitlines()
+        detail = lines[-1] if lines else str(error)
+        raise SyncError(f"could not fetch tag {tag} from {repo}: {detail}")
+    except OSError as error:
+        raise SyncError(f"could not run git to fetch tag {tag} from {repo}: {error}")
+    return head.stdout.strip()
 
 
 def sync(tag, repo=SOURCE_REPO, ais=ROOT / "ais", dest=ROOT / "ais-max"):
@@ -62,7 +88,63 @@ def sync(tag, repo=SOURCE_REPO, ais=ROOT / "ais", dest=ROOT / "ais-max"):
       to go".
     - any ais/<skill>/<file> that BASE_FILES names doesn't exist.
     """
-    raise NotImplementedError
+    if not TAG_FORM.fullmatch(tag):
+        raise SyncError(f"tag {tag!r} is not a release tag of the form vX.Y.Z")
+
+    with tempfile.TemporaryDirectory() as scratch:
+        source = Path(scratch) / "source"
+        commit = _clone(repo, tag, source)
+
+        marketplace = source / MARKETPLACE
+        if not marketplace.is_file():
+            raise SyncError(f"{MARKETPLACE} is missing at tag {tag}")
+        try:
+            data = json.loads(marketplace.read_text())
+        except (OSError, ValueError):
+            raise SyncError(f"{MARKETPLACE} at tag {tag} is not readable JSON")
+        plugins = data.get("plugins", []) if isinstance(data, dict) else []
+        plugin = next((p for p in plugins if isinstance(p, dict) and p.get("name") == "max"), None)
+        if plugin is None:
+            raise SyncError(f'{MARKETPLACE} at tag {tag} lists no plugin named "max"')
+
+        listed = [Path(entry) for entry in plugin.get("skills", [])]
+        seen = set()
+        for path in listed:
+            if path.name in seen:
+                raise SyncError(f"two skills in the max list at tag {tag} share the folder name {path.name}")
+            seen.add(path.name)
+
+        ais_names = {p.name for p in ais.iterdir() if p.is_dir()} if ais.is_dir() else set()
+        keep = [path for path in listed if path.name not in ais_names]
+
+        for path in keep:
+            if not (source / path).is_dir():
+                raise SyncError(f"skill folder {path.as_posix()} is missing at tag {tag}")
+
+        if "helper-skill" not in {path.name for path in keep}:
+            raise SyncError(
+                f"helper-skill is missing from the max plugin at {tag}, so ticket-shapes.md, "
+                "RECORD-FORMAT.md and ticket-pr.md have nowhere to go")
+
+        for file, skill in BASE_FILES.items():
+            if not (ais / skill / file).is_file():
+                raise SyncError(f"ais base file ais/{skill}/{file} is missing")
+
+        staging = Path(scratch) / "ais-max"
+        staging.mkdir()
+        for path in keep:
+            shutil.copytree(source / path, staging / path.name,
+                            ignore=shutil.ignore_patterns(".*"))
+        for file, skill in BASE_FILES.items():
+            shutil.copyfile(ais / skill / file, staging / "helper-skill" / file)
+        (staging / RECORD).write_text(
+            json.dumps({"commit": commit, "tag": tag}, indent=2, sort_keys=True) + "\n")
+
+        if dest.exists():
+            shutil.rmtree(dest)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(staging), str(dest))
+    return len(keep)
 
 
 def main(argv=None):
@@ -80,7 +162,20 @@ def main(argv=None):
 
     Runs against SOURCE_REPO and the ais/ and ais-max/ folders under ROOT.
     """
-    raise NotImplementedError
+    parser = argparse.ArgumentParser(description="Rebuild ais-max/ from one Custom-skills release tag.")
+    parser.add_argument("tag", help='a Custom-skills release tag, such as "v2.1.0"')
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as stop:
+        return stop.code
+
+    try:
+        count = sync(args.tag)
+    except SyncError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    print(f"Wrote {count} skills to ais-max from {args.tag}")
+    return 0
 
 
 if __name__ == "__main__":
