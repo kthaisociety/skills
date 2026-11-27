@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Copy the ais or ais-max skills from this clone into one coding agent's
 # skills folder. For developers only: members install the plugins from the
-# release repos (ADR-0004). Copies, never symlinks (ADR-0011).
+# release repos (ADR-0004). Copies, never symlinks (ADR-0013).
 #
 # Usage: ./install.sh [--yes] [AGENT] [PLUGIN]
 #

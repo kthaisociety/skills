@@ -1,4 +1,4 @@
-# ADR-0011: install.sh copies skills and never links them
+# ADR-0013: install.sh copies skills and never links them
 
 **Decision:** `install.sh` MUST copy each skill from the clone into the agent's skills folder, and MUST NOT symlink it.
 

@@ -1,4 +1,4 @@
-# ADR-0011: The release planner only plans the version
+# ADR-0012: The release planner only plans the version
 
 **Decision:** `scripts/plan-release.py` MUST only work out the release's version and report what it read to get there, and the release run's other steps MUST stay as steps in the release workflow, not move into a release script.
 
