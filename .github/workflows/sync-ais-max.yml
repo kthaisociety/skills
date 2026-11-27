@@ -1,0 +1,44 @@
+# Rebuild ais-max from the newest Custom-skills release tag, and open a PR.
+#
+# Runs once a day, and by hand from the Actions tab. The job does nothing
+# when the newest tag matches ais-max/.source.json (ADR-0011). Every
+# decision past the trigger lives in scripts/scheduled-sync.py, which the
+# last step runs; see its docstrings for what the job guarantees.
+#
+# Needs the repo setting "Allow GitHub Actions to create and approve pull
+# requests", under Settings, Actions, General.
+
+name: Sync ais-max
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-ais-max
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      # The Claude and Antigravity checks fail without their CLIs
+      # (ADR-0006, ADR-0009). Install both here, with their native installers.
+
+      - name: Sync, check, and open a PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/scheduled-sync.py
