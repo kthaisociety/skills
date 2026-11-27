@@ -17,7 +17,7 @@ The one-time copy of a Custom-skills skill into **ais**, after which this repo a
 _Avoid_: import, fork
 
 **Sync**:
-A run of `scripts/sync-ais-max.py` that rebuilds **ais-max** from one Custom-skills release tag. The scheduled job runs it against the latest tag and opens a PR only when the rebuild leaves a diff.
+A run of `scripts/sync-ais-max.py` that rebuilds **ais-max** from one Custom-skills release tag. The scheduled job runs it only when the newest Custom-skills release tag differs from the one **ais-max** records, and opens a PR for that tag.
 _Avoid_: update, pull, mirror
 
 **Release repo**:
@@ -32,12 +32,17 @@ _Avoid_: build output, dist
 A run of `install.sh` that copies one plugin's skills from a clone into one agent's skills folder, so a developer can try them before a release. Choosing **ais-max** copies **ais** too.
 _Avoid_: link, symlink install
 
+**Release tag**:
+A `vX.Y.Z` tag in this repo marking a release. The next version counts from the highest one reachable from `main`.
+_Avoid_: version tag
+
 ## Relationships
 
 - **ais-max** depends on exactly one **ais**
 - Each agent has exactly one **Release repo**, holding both **ais** and **ais-max**
 - A build writes one **Plugin tree** per agent, and the check reads only that tree, never the source folders
 - A **Release repo** holds one **Tree**, rebuilt for every release, with one version shared by its marketplace and both plugins
+- A release gives every **Plugin tree** the same version, bumped from the last **Release tag** by the commit titles since it
 - Every skill in **ais** came from one **Seed**; a **Sync** never touches **ais**
 - A **Sync** replaces the base-file copies in `ais-max`'s `helper-skill` with the **ais** versions
 - A **Local install** replaces or removes only the skill folders an earlier **Local install** wrote
