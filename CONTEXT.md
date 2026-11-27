@@ -28,12 +28,17 @@ _Avoid_: mirror, dist repo
 The folder a build script writes for one agent, holding **ais** and **ais-max** each as a plugin of its own, ready to publish to that agent's **Release repo**.
 _Avoid_: build output, dist
 
+**Release tag**:
+A `vX.Y.Z` tag in this repo marking a release. The next version counts from the highest one reachable from `main`.
+_Avoid_: version tag
+
 ## Relationships
 
 - **ais-max** depends on exactly one **ais**
 - Each agent has exactly one **Release repo**, holding both **ais** and **ais-max**
 - A build writes one **Plugin tree** per agent, and the check reads only that tree, never the source folders
 - A **Release repo** holds one **Tree**, rebuilt for every release, with one version shared by its marketplace and both plugins
+- A release gives every **Plugin tree** the same version, bumped from the last **Release tag** by the commit titles since it
 - Every skill in **ais** came from one **Seed**; a **Sync** never touches **ais**
 - A **Sync** replaces the base-file copies in `ais-max`'s `helper-skill` with the **ais** versions
 
