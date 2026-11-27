@@ -4,12 +4,19 @@
 Usage: python3 scripts/plan-release.py
 """
 
+import argparse
+import json
+import re
+import subprocess
 import sys
 from collections import namedtuple
 from pathlib import Path
 
 ROOT = Path(__file__).absolute().parent.parent
 RECORD = Path("ais-max") / ".source.json"
+_RELEASE_TAG = re.compile(r"v([0-9]+)\.([0-9]+)\.([0-9]+)")
+_BREAKING = re.compile(r"[a-z]+(\([^()]*\))?!:")
+_FEAT = re.compile(r"feat(\([^()]*\))?:")
 
 Plan = namedtuple("Plan", ["version", "last_tag", "source_tag"])
 Plan.__doc__ = """What a release would be, read from the repo without changing it.
@@ -58,7 +65,64 @@ def plan(repo=ROOT, record=None):
     Reads only. It writes nothing, fetches nothing, and runs only local git,
     so the caller must have every tag and the full history checked out.
     """
-    raise NotImplementedError
+    repo = Path(repo)
+    if _git(repo, "rev-parse", "--is-inside-work-tree").strip() != "true":
+        raise PlanError(f"{repo} is not a git work tree")
+    try:
+        _git(repo, "rev-parse", "--verify", "HEAD")
+    except PlanError as error:
+        raise PlanError(f"{repo} has no commit to plan from: {error}") from error
+
+    last = None
+    for name in _git(repo, "tag", "--merged", "HEAD").splitlines():
+        match = _RELEASE_TAG.fullmatch(name)
+        if match:
+            key = tuple(int(part) for part in match.groups())
+            if last is None or key > last[0]:
+                last = (key, name)
+
+    if last is None:
+        version, last_tag = "1.0.0", None
+    else:
+        (major, minor, patch), last_tag = last
+        span = f"{last_tag}..HEAD"
+        if not _git(repo, "rev-list", span).strip():
+            raise PlanError(f"nothing to release since {last_tag}")
+        titles = _git(repo, "log", "--format=%s", span).splitlines()
+        if any(_BREAKING.match(title) for title in titles):
+            major, minor, patch = major + 1, 0, 0
+        elif any(_FEAT.match(title) for title in titles):
+            minor, patch = minor + 1, 0
+        else:
+            patch += 1
+        version = f"{major}.{minor}.{patch}"
+
+    path = (repo / RECORD) if record is None else Path(record)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise PlanError(f"sync record {path} can't be read: {error}") from error
+    try:
+        data = json.loads(text)
+    except ValueError as error:
+        raise PlanError(f"sync record {path} isn't JSON: {error}") from error
+    if not isinstance(data, dict) or not isinstance(data.get("tag"), str):
+        raise PlanError(f"sync record {path} must be a JSON object with a string \"tag\"")
+
+    return Plan(version, last_tag, data["tag"])
+
+
+def _git(repo, *args):
+    """Run git with args in repo and return its stdout. Raise PlanError with git's last stderr line."""
+    try:
+        done = subprocess.run(["git", "-C", str(repo), *args],
+                              capture_output=True, text=True, check=False)
+    except OSError as error:
+        raise PlanError(f"could not run git for {repo}: {error}") from error
+    if done.returncode != 0:
+        lines = done.stderr.strip().splitlines()
+        raise PlanError(lines[-1] if lines else f"git {' '.join(args)} failed in {repo}")
+    return done.stdout
 
 
 def main(argv=None):
@@ -78,7 +142,20 @@ def main(argv=None):
       "error: nothing to release since v1.2.0".
     - 2 when argv isn't empty, per argparse.
     """
-    raise NotImplementedError
+    parser = argparse.ArgumentParser(description="Plan the next release version of this repo's HEAD.")
+    try:
+        parser.parse_args(argv)
+    except SystemExit as stop:
+        return stop.code if isinstance(stop.code, int) else 2
+    try:
+        result = plan(ROOT)
+    except PlanError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    print(f"version={result.version}")
+    print(f"last_tag={result.last_tag or ''}")
+    print(f"source_tag={result.source_tag}")
+    return 0
 
 
 if __name__ == "__main__":
