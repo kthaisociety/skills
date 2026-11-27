@@ -1,4 +1,4 @@
-"""Acceptance tests for #10, the release planner in scripts/plan-release.py.
+"""Tests for scripts/plan-release.py, which plans the next release version.
 
 Every test runs against a fake repo built in a temp folder with real git, so
 none of them reads this repo's own tags or ais-max/ sync record.
@@ -241,12 +241,6 @@ class TestLastTag(RepoCase):
 
 
 class TestNothingToRelease(RepoCase):
-
-    def test_no_commit_since_last_tag_raises(self):
-        """HEAD on the last release tag raises PlanError."""
-        self.tagged("v1.2.0")
-        with self.assertRaises(PlanError):
-            plan(self.repo)
 
     def test_no_commit_since_last_tag_says_so(self):
         """The message is exactly "nothing to release since v1.2.0"."""
