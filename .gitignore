@@ -5,6 +5,9 @@
 .codex/
 skills-lock.json
 
+# Build output (scripts/build-claude.py, including its staging folder)
+.claude-build*/
+
 # Dependencies and junk
 node_modules/
 .DS_Store

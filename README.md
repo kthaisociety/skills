@@ -118,6 +118,13 @@ python3 scripts/build-agy.py build 1.0.0
 python3 scripts/build-agy.py check
 ```
 
+Build the Claude marketplace tree into `.claude-build/`, git-ignored, then check it. The check runs `claude plugin validate`, so it needs `Claude Code` installed:
+
+```bash
+python3 scripts/build-claude.py build 1.0.0
+python3 scripts/build-claude.py check
+```
+
 A weekly GitHub Action runs `skill:sync` and opens a PR when upstream skills change.
 
 ## License
