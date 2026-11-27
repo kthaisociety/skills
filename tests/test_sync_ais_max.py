@@ -1,4 +1,4 @@
-"""Acceptance tests for #5: rebuild ais-max from a Custom-skills tag.
+"""Tests for scripts/sync-ais-max.py, which rebuilds ais-max/ from a Custom-skills tag.
 
 Every test runs against a fake Custom-skills git repo built in a temp folder,
 so none of them touches the network or the real ais-max/, except the
@@ -114,6 +114,12 @@ def build_source(repo):
     shutil.rmtree(repo / "kanban" / "new-ticket")
     write(mp, marketplace(BASE_LIST))
     shas["v9.5.0"] = commit_and_tag(repo, "v9.5.0")
+
+    write(mp, b"{not json")
+    shas["v9.6.0"] = commit_and_tag(repo, "v9.6.0")
+
+    write(mp, b"[]")
+    shas["v9.7.0"] = commit_and_tag(repo, "v9.7.0")
     return shas
 
 
@@ -309,7 +315,7 @@ class TestSyncAcrossTags(SyncCase):
         self.assertEqual(snapshot(self.dest), first)
 
     def test_same_tag_picks_up_an_ais_base_file_edit(self):
-        """Rerunning the same tag after an ais base file changes writes the new bytes (ADR-0005)."""
+        """Rerunning the same tag after an ais base file changes writes the new bytes."""
         self.run_sync()
         write(self.ais / "pr-ticket" / "ticket-pr.md", b"edited in ais\n")
         self.run_sync()
@@ -364,6 +370,14 @@ class TestSyncStops(SyncCase):
     def test_missing_marketplace_file_stops(self):
         """A tag without .claude-plugin/marketplace.json raises SyncError naming the file."""
         self.assert_stops("v9.4.0", "marketplace.json")
+
+    def test_unreadable_marketplace_file_stops(self):
+        """A marketplace file that is not valid JSON raises SyncError naming the file."""
+        self.assert_stops("v9.6.0", "marketplace.json")
+
+    def test_marketplace_file_that_is_not_an_object_stops(self):
+        """A marketplace file holding JSON that is not an object raises SyncError naming max."""
+        self.assert_stops("v9.7.0", "max")
 
     def test_missing_ais_base_file_stops(self):
         """A missing ais base file raises SyncError naming it."""
@@ -456,7 +470,7 @@ class TestMain(SyncCase):
 
 
 class TestCommittedAisMax(unittest.TestCase):
-    """The ais-max/ committed in this repo, from the first run against v2.1.0 onwards."""
+    """The ais-max/ committed in this repo."""
 
     def read_record(self):
         path = ROOT / "ais-max" / sync_ais_max.RECORD
@@ -473,14 +487,14 @@ class TestCommittedAisMax(unittest.TestCase):
         self.assertRegex(self.read_record().get("commit", ""), r"^[0-9a-f]{40}$")
 
     def test_holds_no_ais_skill(self):
-        """No folder in the committed ais-max shares a name with an ais skill (ADR-0002)."""
+        """No folder in the committed ais-max shares a name with an ais skill."""
         self.read_record()
         ais = {p.name for p in (ROOT / "ais").iterdir() if p.is_dir()}
         ais_max = {p.name for p in (ROOT / "ais-max").iterdir() if p.is_dir()}
         self.assertEqual(ais & ais_max, set())
 
     def test_helper_skill_matches_ais(self):
-        """Each base file in the committed helper-skill matches its ais original (ADR-0003)."""
+        """Each base file in the committed helper-skill matches its ais original."""
         self.read_record()
         for file, skill in sync_ais_max.BASE_FILES.items():
             with self.subTest(file=file):
