@@ -110,6 +110,10 @@ def build_source(repo):
 
     mp.unlink()
     shas["v9.4.0"] = commit_and_tag(repo, "v9.4.0")
+
+    shutil.rmtree(repo / "kanban" / "new-ticket")
+    write(mp, marketplace(BASE_LIST))
+    shas["v9.5.0"] = commit_and_tag(repo, "v9.5.0")
     return shas
 
 
@@ -343,6 +347,10 @@ class TestSyncStops(SyncCase):
         """A listed skill folder absent at the tag raises SyncError naming it."""
         self.assert_stops("v9.1.0", "ghost")
 
+    def test_missing_ais_named_folder_stops(self):
+        """A listed folder absent at the tag stops the run even when ais has a folder of that name."""
+        self.assert_stops("v9.5.0", "new-ticket")
+
     def test_missing_helper_skill_stops_with_a_plain_message(self):
         """A max list without helper-skill raises SyncError with the fixed message."""
         with self.assertRaises(SyncError) as caught:
@@ -373,7 +381,7 @@ class TestSyncStops(SyncCase):
         """When sync raises SyncError, dest is exactly as it was before the run."""
         self.seed_dest()
         before = snapshot(self.dest)
-        for tag in ("bad", "v7.7.7", "v9.0.0", "v9.1.0", "v9.2.0", "v9.3.0", "v9.4.0"):
+        for tag in ("bad", "v7.7.7", "v9.0.0", "v9.1.0", "v9.2.0", "v9.3.0", "v9.4.0", "v9.5.0"):
             with self.subTest(tag=tag):
                 with self.assertRaises(SyncError):
                     self.run_sync(tag)
