@@ -132,7 +132,7 @@ python3 scripts/build-claude.py build 1.0.0
 python3 scripts/build-claude.py check
 ```
 
-A weekly GitHub Action runs `skill:sync` and opens a PR when upstream skills change.
+The `Sync ais-max` GitHub Action runs `scripts/scheduled-sync.py` once a day, and by hand from the Actions tab. When the newest `vX.Y.Z` tag on Custom-skills differs from the one `ais-max/.source.json` names, it syncs, runs the tests and the three tree checks, and opens a PR. It needs "Allow GitHub Actions to create and approve pull requests" on, under Settings, Actions, General.
 
 ## License
 
