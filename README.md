@@ -104,6 +104,13 @@ npm run skill:check
 npm run skills:install
 ```
 
+Rebuild `ais-max/` from a Custom-skills release tag, and run the script's tests:
+
+```bash
+python3 scripts/sync-ais-max.py v2.1.0
+python3 -m unittest discover -s tests
+```
+
 A weekly GitHub Action runs `skill:sync` and opens a PR when upstream skills change.
 
 ## License
