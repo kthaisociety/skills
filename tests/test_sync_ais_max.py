@@ -373,7 +373,7 @@ class TestSyncStops(SyncCase):
 
     def test_unreadable_marketplace_file_stops(self):
         """A marketplace file that is not valid JSON raises SyncError naming the file."""
-        self.assert_stops("v9.6.0", "marketplace.json")
+        self.assert_stops("v9.6.0", "not readable JSON")
 
     def test_marketplace_file_that_is_not_an_object_stops(self):
         """A marketplace file holding JSON that is not an object raises SyncError naming max."""
