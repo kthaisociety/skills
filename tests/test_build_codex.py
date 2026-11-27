@@ -1,4 +1,4 @@
-"""Acceptance tests for #7: scripts/build-codex.py builds and checks the ais-codex tree.
+"""Tests for scripts/build-codex.py, which builds and checks the ais-codex tree.
 
 Most tests build from fake ais/ and ais-max/ folders in a temp folder. The
 TestRealSources and TestMain tests read the ais/ and ais-max/ committed in
@@ -381,8 +381,8 @@ class TestSkillOwners(WorkCase):
         self.assertEqual(list(self.owners()),
                          ["grill-docs", "new-ticket", "architect-ticket", "helper-skill"])
 
-    def test_skips_hidden_folders_and_loose_files(self):
-        """Dot-named folders and loose files are not skills."""
+    def test_skips_hidden_folders(self):
+        """Dot-named folders are not skills."""
         self.assertNotIn(".hidden-skill", self.owners())
 
     def test_refuses_a_skill_in_both_plugins(self):
